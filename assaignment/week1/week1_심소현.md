@@ -2,11 +2,11 @@
 
 ## 터미널
 
-![week1_1.png](../../img/sohyeon_week1_1.png)
+![week1_1.png](../../img/sohyeon_week1/sohyeon_week1_1.png)
 
-![week1_2.png](../../img/sohyeon_week1_2.png)
+![week1_2.png](../../img/sohyeon_week1/sohyeon_week1_2.png)
 
-![week1_3.png](../../img/sohyeon_week1_3.png)
+![week1_3.png](../../img/sohyeon_week1/sohyeon_week1_3.png)
 
 ## 실행 설명
 
