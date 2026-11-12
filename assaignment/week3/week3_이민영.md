@@ -5,7 +5,7 @@
 | 과제 | 기초 | 심화 |
 |---|---|---|
 | 과제 1 | 전부 수행 | tcpdump 패킷 경로 검증, 부하 분산 비율 측정은 수행. Service 생성 전후 비교, 백엔드 변경 관찰, iptables·IPVS·nftables 비교는 미수행 |
-| 과제 2 | 수행 | 아래 과제 2 참고 |
+| 과제 2 | 전부 수행 | 미수행: 관리 책임 분리·RBAC, YAML 매핑 비교, 전환 판단 |
 | 과제 3 | 전부 수행 | Nginx v1·v2 가중치 80:20은 미수행 |
 
 ## 실습 환경
@@ -206,7 +206,57 @@ kubectl exec client -- sh -c 'for i in $(seq 1 1000); do curl -s http://web; don
 
 # 과제 2. Ingress의 한계와 Gateway API로 전환하는 이유
 
-<!-- 과제 2 내용 붙여 넣기 -->
+공식 문서 [Migrating from Ingress](https://gateway-api.sigs.k8s.io/guides/getting-started/migrating-from-ingress/)를 읽고 기초 항목을 정리했습니다. 과제 3에서 직접 구성해 본 리소스를 예로 들었습니다.
+
+## 1. Ingress와 Ingress controller
+
+Ingress는 "이 호스트와 경로로 들어온 요청은 이 Service로 보낸다"는 규칙만 적어 둔 API 리소스입니다. 혼자서는 아무 일도 하지 않습니다. 이 규칙을 읽고 실제로 트래픽을 받는 프록시(ingress-nginx, Traefik 등)를 띄워 설정하는 쪽이 Ingress controller입니다. 그래서 Ingress만 만들고 컨트롤러를 설치하지 않으면 아무 동작도 하지 않습니다. 어떤 컨트롤러가 이 Ingress를 처리할지는 `ingressClassName`으로 정합니다.
+
+과제 3과 비교하면 Ingress는 HTTPRoute 같은 설정 객체이고, Ingress controller는 Envoy Gateway(설정 해석)와 Envoy Proxy(트래픽 처리)를 합쳐 놓은 자리에 해당합니다.
+
+## 2. Ingress API 기본 기능과 컨트롤러별 확장
+
+공식 문서는 Ingress API가 "TLS 종료와 단순한 콘텐츠 기반 HTTP 라우팅만 지원한다"고 설명합니다.
+
+| 구분 | 내용 |
+|---|---|
+| Ingress API 기본 기능 | 호스트 매칭, 경로 매칭(`Prefix`, `Exact`, `ImplementationSpecific`), Service 백엔드 지정, TLS Secret을 이용한 TLS 종료, 기본 백엔드 |
+| 컨트롤러별 확장 (주로 annotation) | HTTP→HTTPS 리다이렉트, URL 재작성, 헤더 추가·삭제, 가중치 기반 트래픽 분할, 헤더·쿼리·메서드 매칭, 타임아웃·재시도, 인증, rate limit 등 |
+
+과제 3에서 쓴 `/app` → `/` 경로 재작성도 Ingress에서는 ingress-nginx의 `nginx.ingress.kubernetes.io/rewrite-target` 같은 annotation으로 해야 하는 기능입니다. Gateway API에서는 HTTPRoute의 `URLRewrite` 필터라는 표준 필드로 썼습니다.
+
+## 3. annotation에 의존할 때 생기는 문제
+
+- 이식성: annotation 이름과 의미가 컨트롤러마다 다릅니다. ingress-nginx용 annotation은 다른 컨트롤러에서 무시되거나 다르게 동작하므로, 컨트롤러를 바꾸면 Ingress를 다시 써야 합니다. 공식 문서도 annotation 방식의 확장은 이식성을 떨어뜨린다고 적고 있습니다.
+- 검증이 안 됨: annotation 값은 그냥 문자열이라 API 서버가 스키마로 검사하지 못합니다. 오타가 나도 생성은 성공하고, 컨트롤러가 조용히 무시하면 원인을 찾기 어렵습니다.
+- 유지보수: 기능이 늘수록 annotation이 쌓여 Ingress 하나에 설정이 몰립니다. 어떤 annotation이 어떤 규칙에 적용되는지(Ingress 전체인지 경로 하나인지)도 컨트롤러마다 해석이 달라 읽기 어렵습니다.
+- 규칙 병합: 여러 Ingress가 같은 호스트를 쓸 때 어떻게 합치고 충돌을 처리할지 Ingress API는 정하지 않고 컨트롤러에 맡깁니다. Gateway API는 구현체가 정해진 방식(더 구체적인 매칭 우선 등)으로 병합하도록 규정합니다.
+
+## 4. GatewayClass, Gateway, HTTPRoute
+
+| 리소스 | 역할 | 주로 관리하는 사람 | 과제 3 예 |
+|---|---|---|---|
+| GatewayClass | 어떤 컨트롤러가 Gateway를 구현할지 정함. Ingress의 IngressClass와 비슷한 위치 | 인프라 제공자 | `eg` → `gateway.envoyproxy.io/gatewayclass-controller` |
+| Gateway | 진입점 정의. 리스너(포트, 프로토콜, 호스트명, TLS)를 명시 | 클러스터 운영자 | `eg`, 포트 80 HTTP 리스너 |
+| HTTPRoute | 호스트·경로 매칭, 필터, 백엔드 지정 | 애플리케이션 개발자 | `nginx-route`, `nginx.example.com`, `/app` 재작성 |
+
+관계는 `GatewayClass ← gatewayClassName ← Gateway ← parentRefs ← HTTPRoute → backendRefs → Service` 순서입니다. Ingress는 진입점(HTTP·HTTPS 포트)이 컨트롤러에 암묵적으로 정해져 있지만, Gateway API는 진입점을 Gateway에 직접 적어야 합니다. 라우트는 HTTPRoute로 따로 떼어져 있어서 Gateway 하나에 여러 팀의 HTTPRoute가 붙을 수 있습니다. 실습에서도 Gateway `eg`에 `backend`, `nginx-route` 두 개가 붙어 `attachedRoutes: 2`로 나왔습니다.
+
+## 5. Ingress API와 Gateway API 비교
+
+| 기준 | Ingress API | Gateway API |
+|---|---|---|
+| 기능 | 호스트·경로 라우팅, TLS 종료 정도 | Ingress 기능에 더해 리다이렉트, URL 재작성, 헤더 조작, 가중치 분할, 헤더·쿼리·메서드 매칭이 표준 필드. HTTP 외 TCP·UDP·gRPC 등 라우트 종류도 따로 있음 |
+| 확장 방식 | annotation, 비 Service 백엔드 | `extensionRef` 같은 명시적 참조, Policy attachment, 구현체별 지원 수준(Core / Extended / Implementation-specific)을 문서화. Gateway API 리소스에 annotation으로 기능을 넣는 건 권장하지 않음 |
+| 관리 책임 | 사실상 한 리소스에 진입점·TLS·라우팅이 모두 있어 한 사람(또는 팀)이 함께 관리 | 인프라 제공자, 클러스터 운영자, 앱 관리자, 앱 개발자 네 역할로 나뉨. 리소스가 나뉘어 있어 RBAC로 역할별 권한을 줄 수 있음 |
+| 진입점 | 컨트롤러가 암묵적으로 제공 | Gateway 리스너에 명시 |
+| 규칙 병합·충돌 | 컨트롤러마다 다름 | 표준에서 병합 방식을 규정 |
+| 기본 백엔드 | `defaultBackend` 필드 | 직접 대응 필드 없음. `/` PathPrefix 규칙으로 대신함 |
+
+## 하지 못한 것
+
+심화(관리 책임 분리와 RBAC 연결, 공식 문서 YAML의 필드 매핑, 전환 판단)는 하지 못했습니다.
+
 
 # 과제 3. Envoy Gateway로 Gateway API 적용하기
 
