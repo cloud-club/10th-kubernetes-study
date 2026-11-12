@@ -801,3 +801,152 @@ Annotation 자동 변환
 ---
 
 # **과제 3. Envoy Gateway로 Gateway API 적용하기**
+
+## 0. 설치
+
+![week2_3.png](../../img/sohyeon/week2/sohyeon_week2_3.png)
+
+## **1. Envoy Gateway 설치 및 CRD 확인**
+
+![week2_4.png](../../img/sohyeon/week2/sohyeon_week2_4.png)
+
+- CRD(Custom Resource Definition)는 Kubernetes에 새로운 리소스 종류를 등록하는 기능이다. Gateway API CRD가 설치되어야 `Gateway`, `HTTPRoute` 등의 리소스를 생성할 수 있다.
+
+## **2. 기존 Nginx 백엔드 확인**
+
+![week2_5.png](../../img/sohyeon/week2/sohyeon_week2_5.png)
+
+- Pod IP로 접근하면 해당 Pod에 직접 요청을 전달하지만, Service 이름으로 접근하면 Service에 연결된 백엔드 중 하나가 선택된다. 이를 통해 기존 Nginx 서비스를 Gateway API의 백엔드로 사용할 준비가 되었음을 확인하였다.
+
+## **3. Gateway API 리소스 구성**
+
+### 3.1 **GatewayClass**
+
+- GatewayClass는 어떤 구현체가 Gateway 설정을 처리할지 결정하는 리소스이다.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+```
+
+### **3.2. Gateway**
+
+- Gateway는 외부 요청을 받아들이는 진입점의 설정을 정의한다.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: nginx-gateway
+  namespace: default
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: nginx.example.com
+      allowedRoutes:
+        namespaces:
+          from: Same
+```
+
+### 3.3 **HTTPRoute**
+
+- HTTPRoute는 Gateway에서 받은 HTTP 요청을 어떤 Service로 전달할지 정의하는 리소스이다.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nginx-route
+  namespace: default
+spec:
+  parentRefs:
+    - name: nginx-gateway
+      sectionName: http
+  hostnames:
+    - nginx.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /nginx
+      backendRefs:
+        - name: nginx-service
+          port: 80
+```
+
+### 3.4 리소스 상태
+
+| 리소스           | 실제 상태           | 의미               |
+| ---------------- | ------------------- | ------------------ |
+| GatewayClass     | `Accepted=True`     | 정상 수락          |
+| Gateway          | `Accepted=True`     | 정상 수락          |
+| Gateway          | `Programmed=False`  | 외부 주소 미할당   |
+| Gateway Listener | `Programmed=True`   | Listener 설정 반영 |
+| HTTPRoute        | `Accepted=True`     | 라우팅 규칙 수락   |
+| HTTPRoute        | `ResolvedRefs=True` | Service 참조 정상  |
+
+## **4. Envoy Gateway와 Envoy Proxy 상태 확인**
+
+![week2_6.png](../../img/sohyeon/week2/sohyeon_week2_6.png)
+
+- `envoy-gateway` Pod는 Gateway API 설정을 관리하는 컨트롤러이다.
+- `envoy-default-nginx-gateway-...` Pod는 실제 HTTP 요청을 처리하는 Envoy Proxy이다.
+- 두 Pod 모두 `Running` 상태임을 확인하였다.
+- Envoy Proxy용 Service는 `LoadBalancer` 타입이지만, kind 환경에서 외부 IP를 할당받지 못해 `<pending>`으로 표시되었다.
+
+## **5. 포트포워딩을 통한 접근**
+
+![week2_7.png](../../img/sohyeon/week2/sohyeon_week2_7.png)
+
+![week2_8.png](../../img/sohyeon/week2/sohyeon_week2_8.png)
+
+![week2_9.png](../../img/sohyeon/week2/sohyeon_week2_9.png)
+
+- `ENVOY_SERVICE`에는 생성된 Envoy Proxy Service의 이름을 저장하였다.
+- `Forwarding from 127.0.0.1:9999 -> 10080`이 출력되어 포트포워딩이 정상 설정되었다.
+- 포트포워딩을 사용하면 외부 IP 없이도 로컬 컴퓨터에서 Envoy Proxy에 요청을 보낼 수 있다.
+- 올바른 Host와 Path를 사용한 요청만 백엔드로 전달되었다. 이를 통해 HTTPRoute에 작성한 호스트·경로 기반 라우팅 규칙이 실제로 적용되었음을 확인하였다.
+
+## 6. 정리
+
+### 6.1 Envoy Gateway 역할
+
+![week2_10.png](../../img/sohyeon/week2/sohyeon_week2_10.png)
+
+### 6.2 전체 요청 경로
+
+![week2_11.png](../../img/sohyeon/week2/sohyeon_week2_11.png)
+
+| 구성 요소     | 역할                                     |
+| ------------- | ---------------------------------------- |
+| Envoy Gateway | YAML 설정을 읽고 Envoy Proxy를 생성·관리 |
+| Envoy Proxy   | 실제 HTTP 요청을 받아 전달               |
+| GatewayClass  | 사용할 컨트롤러 지정                     |
+| Gateway       | HTTP 요청을 받을 진입점 설정             |
+| HTTPRoute     | 요청을 보낼 Service 지정                 |
+| Service       | 요청을 연결된 Nginx Pod 중 하나로 전달   |
+| Nginx Pod     | HTTP 요청을 처리하고 응답 반환           |
+
+---
+
+### 비고
+
+- 과제 1을 수행할 때 스크린샷을 찍지 못하고 터미널을 종료시켜서 부득이하게 텍스트로 남겼습니다.
+- 과제 3의 심화 파트는 시간 여건 상 진행하지 못했습니다.
+
+### 궁금한 점
+
+과제 1의 2.3 하단 스크린샷은 모든 실습을 마친 다음 날 클러스터 상태를 다시 확인하면서 촬영한 것입니다.
+
+실습 중 nginx-b Pod를 삭제하고 재생성했을 때 IP가 `10.244.2.2`에서 `10.244.2.3`으로 변경된 것을 확인했습니다.
+
+그런데 다음 날 클러스터 상태를 다시 확인하니 nginx-b의 IP가 재생성 이전 주소인 `10.244.2.2`로 돌아와 있었습니다.
+
+Pod를 다시 삭제하거나 생성하지 않았는데 IP가 변경된 이유가 궁금합니다. WSL2나 kind 클러스터가 재시작되면서 Pod IP가 다시 할당될 수도 있는 건가요?
