@@ -1,7 +1,5 @@
 # week2 이연호
 
-
-
 ## 실습 환경
 
 | 항목 | 내용 |
@@ -19,6 +17,15 @@
 ---
 
 # 과제 1. Nginx로 알아보는 Pod 통신과 Service 동작 원리
+
+## 실습 환경 구조
+
+![과제 1 실습 환경 구조](../../img/dldusgh318_week2/week2_arch_task1.png)
+
+- 클러스터 안에 노드 3개가 있고, Pod는 특정 노드 위에서 실행됩니다.
+- 노드마다 kindnet(CNI)과 kube-proxy가 하나씩 동작합니다.
+- client는 클러스터 안에서 요청을 보내기 위해 만든 Pod이며, 같은 노드·다른 노드 통신을 비교하려고 nginx-a와 같은 워커 A에 배치했습니다.
+- Service(nginx-svc)는 특정 노드에 올라가 있지 않습니다. kube-proxy가 모든 노드에 같은 iptables 규칙을 만들어, 어느 노드에서 ClusterIP로 요청해도 실제 Pod로 바뀌어 전달됩니다.
 
 ## 실습 준비
 
@@ -40,9 +47,6 @@ nodes:
 kind create cluster --name netlab --config kind.yaml
 kubectl get nodes -o wide
 ```
-
-![클러스터 생성과 노드 확인](../../img/dldusgh318_week2/week2_1.png)
-
 
 ### Pod와 Service 배포
 
@@ -122,8 +126,6 @@ kubectl exec nginx-b -- sh -c 'echo "hello from nginx-b (worker B)" > /usr/share
 
 ## 기초 1. Pod와 Service의 구성 확인
 
-![Pod 배치 확인](../../img/dldusgh318_week2/week2_2.png)
-
 | Pod | Pod IP | 노드 | 노드 IP |
 | --- | --- | --- | --- |
 | client | 10.244.1.3 | netlab-worker (워커 A) | 172.18.0.2 |
@@ -132,7 +134,7 @@ kubectl exec nginx-b -- sh -c 'echo "hello from nginx-b (worker B)" > /usr/share
 
 워커 A의 Pod는 `10.244.1.x`, 워커 B의 Pod는 `10.244.2.x`처럼 노드마다 Pod IP 대역이 나뉘어 있습니다.
 
-![Service와 EndpointSlice 확인](../../img/dldusgh318_week2/week2_3.png)
+![Service와 EndpointSlice 확인](../../img/dldusgh318_week2/week2_1.png)
 
 | 항목 | 값 |
 | --- | --- |
@@ -153,7 +155,7 @@ kubectl exec client -- nslookup nginx-svc                       # DNS 조회
 kubectl exec client -- curl -s nginx-svc                        # DNS 이름
 ```
 
-![통신 테스트 결과](../../img/dldusgh318_week2/week2_4.png)
+![통신 테스트 결과](../../img/dldusgh318_week2/week2_2.png)
 
 | 요청 대상 | 결과 |
 | --- | --- |
@@ -166,15 +168,11 @@ kubectl exec client -- curl -s nginx-svc                        # DNS 이름
 
 CNI는 kindnet이고, kindnet과 kube-proxy가 노드마다 하나씩 동작합니다.
 
-![kindnet과 kube-proxy](../../img/dldusgh318_week2/week2_5.png)
-
 client Pod 안에서는 모든 트래픽을 노드(`10.244.1.1`)로 넘깁니다. `eth0@if12`는 이 인터페이스의 반대쪽 끝(veth)이 노드에 있다는 뜻입니다.
-
-![client Pod의 인터페이스와 라우팅](../../img/dldusgh318_week2/week2_6.png)
 
 워커 A의 라우팅 표와 인터페이스입니다.
 
-![워커 A의 라우팅과 인터페이스](../../img/dldusgh318_week2/week2_7.png)
+![워커 A의 라우팅과 인터페이스](../../img/dldusgh318_week2/week2_3.png)
 
 ```text
 10.244.1.2 dev vethe73c6d98 scope host     # nginx-a: 같은 노드, veth로 바로 전달
@@ -187,8 +185,6 @@ client Pod 안에서는 모든 트래픽을 노드(`10.244.1.1`)로 넘깁니다
 - `tunl0`, `gre0` 같은 터널 장치는 모두 `DOWN` 상태로 사용되지 않습니다. 노드 간 통신은 VXLAN 같은 터널 없이 Docker 네트워크(172.18.0.0/16) 위에서 라우팅으로 이뤄집니다.
 
 워커 B의 라우팅 표도 같은 구조입니다.
-
-![워커 B의 라우팅](../../img/dldusgh318_week2/week2_8.png)
 
 ```text
 10.244.2.2 dev vethf745b371 scope host     # nginx-b
@@ -257,7 +253,7 @@ docker exec netlab-worker iptables -t nat -nvL PREROUTING
 docker exec netlab-worker iptables-save -t nat | grep 'default/nginx-svc'
 ```
 
-![nginx-svc 관련 iptables 규칙](../../img/dldusgh318_week2/week2_9.png)
+![nginx-svc 관련 iptables 규칙](../../img/dldusgh318_week2/week2_4.png)
 
 처리 순서대로 정리하면 다음과 같습니다.
 
@@ -333,6 +329,17 @@ flowchart LR
 
 # 과제 3. Envoy Gateway로 Gateway API 적용하기
 
+## 실습 환경 구조
+
+과제 1의 클러스터에 Envoy Gateway를 추가하고, 맥에서 들어오는 요청을 nginx로 전달했습니다.
+
+![과제 3 실습 환경 구조](../../img/dldusgh318_week2/week2_arch_task3.png)
+
+- 실선은 실제 요청 경로, 점선은 요청이 오기 전에 설정이 준비되는 과정입니다.
+- Envoy Gateway(컨트롤러)는 YAML과 Pod 명단을 읽고 Envoy Proxy를 설정하며, 요청은 직접 처리하지 않습니다.
+- 실제 요청은 Envoy Proxy가 받아 nginx Pod IP로 바로 전달합니다.
+- kind에는 LoadBalancer가 없어 맥에서 포트포워딩으로 Envoy Proxy에 접근했습니다.
+
 ## 설치
 
 ```bash
@@ -348,11 +355,7 @@ kubectl get crd | grep gateway.networking.k8s.io
 helm list -n envoy-gateway-system
 ```
 
-![Envoy Gateway 설치 확인](../../img/dldusgh318_week2/week2_10.png)
-
 Helm 차트 하나로 Gateway API CRD와 Envoy Gateway 컨트롤러가 함께 설치됐습니다.
-
-![Gateway API 버전 확인](../../img/dldusgh318_week2/week2_11.png)
 
 | 항목 | 버전 |
 | --- | --- |
@@ -390,7 +393,7 @@ kubectl get gateway nginx-gateway
 kubectl get pods,svc -n envoy-gateway-system
 ```
 
-![Gateway 생성 후 Envoy Proxy 확인](../../img/dldusgh318_week2/week2_12.png)
+![Gateway 생성 후 Envoy Proxy 확인](../../img/dldusgh318_week2/week2_5.png)
 
 Gateway를 만들자 Envoy Gateway 컨트롤러가 `envoy-default-nginx-gateway-*` Pod와 Service(Envoy Proxy)를 새로 띄웠습니다. Envoy Proxy Pod는 Envoy 본체와 보조 컨테이너로 구성되어 `READY 2/2`입니다. Service가 `LoadBalancer` 타입이지만 kind에는 외부 IP를 할당하는 장치가 없어 `EXTERNAL-IP`가 `<pending>`으로 남습니다.
 
@@ -444,7 +447,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "Host: other.local" http://localhost
 curl -s -o /dev/null -w "%{http_code}\n" -H "Host: nginx.local" http://localhost:8888/bye
 ```
 
-![요청 결과](../../img/dldusgh318_week2/week2_13.png)
+![요청 결과](../../img/dldusgh318_week2/week2_6.png)
 
 | 요청 | 결과 | 의미 |
 | --- | --- | --- |
@@ -459,7 +462,7 @@ kubectl get httproute nginx-route -o jsonpath='{range .status.parents[*].conditi
 kubectl get gateway nginx-gateway -o jsonpath='{range .status.conditions[*]}{.type}={.status} ({.reason}){"\n"}{end}'
 ```
 
-![상태 조건](../../img/dldusgh318_week2/week2_14.png)
+![상태 조건](../../img/dldusgh318_week2/week2_7.png)
 
 | 리소스 | 조건 | 의미 |
 | --- | --- | --- |
@@ -486,7 +489,22 @@ Gateway의 `Programmed=False`는 외부 주소가 할당되지 않았다는 뜻�
 
 ## 기초 6. 요청 경로
 
-Envoy Gateway는 기본적으로 Service의 ClusterIP를 거치지 않고, nginx-svc의 EndpointSlice에서 Pod IP를 받아 Envoy Proxy가 Pod로 직접 전달합니다. 따라서 이번 실습에서 nginx-a, nginx-b를 고른 것은 iptables가 아니라 Envoy Proxy입니다.
+Envoy Gateway는 Service의 ClusterIP를 거치지 않고, nginx-svc의 EndpointSlice에서 Pod IP를 받아 Envoy Proxy에 넘겨줍니다. Envoy Proxy의 관리 페이지(admin, 19000번 포트)에서 Envoy가 알고 있는 백엔드 목록을 확인했습니다.
+
+```bash
+ENVOY_POD=$(kubectl get pod -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=nginx-gateway -o jsonpath='{.items[0].metadata.name}')
+kubectl -n envoy-gateway-system port-forward pod/$ENVOY_POD 19000:19000   # 별도 터미널
+curl -s localhost:19000/clusters | grep -E '::(10\.244|10\.96)\.' | grep health_flags
+```
+
+![Envoy Proxy가 알고 있는 백엔드](../../img/dldusgh318_week2/week2_8.png)
+
+| 클러스터 | 주소 | 의미 |
+| --- | --- | --- |
+| `httproute/default/nginx-route/rule/0` | 10.244.2.2:80, 10.244.1.2:80 | HTTPRoute의 백엔드가 ClusterIP(10.96.105.128)가 아니라 nginx Pod IP로 등록됨 |
+| `xds_cluster` | 10.96.5.57:18000 | `envoy-gateway` 컨트롤러 Service. Envoy Proxy가 이 주소로 설정을 받아옴 |
+
+따라서 이번 실습에서 nginx-a, nginx-b를 고른 것은 iptables가 아니라 Envoy Proxy입니다. Envoy가 Pod 목록을 직접 가지고 있으면 연결 단위가 아니라 요청 단위로 분산하고, 가중치·재시도 같은 세밀한 제어를 할 수 있습니다.
 
 ```mermaid
 flowchart LR
@@ -506,4 +524,4 @@ flowchart LR
 
 ## 해결하지 못한 문제
 
-- Gateway의 `Programmed` 조건이 `False (AddressNotAssigned)`로 남았습니다. kind 환경에 LoadBalancer 구현이 없어서이며, 포트포워딩으로 대신 접근해 동작을 확인했습니다.
+- Gateway의 `Programmed` 조건이 `False (AddressNotAssigned)`로 남았습니다. kind 환경에 LoadBalancer 구현이 없어서였고 우선은 포트포워딩으로 대신 접근해 동작을 확인했습니다.
