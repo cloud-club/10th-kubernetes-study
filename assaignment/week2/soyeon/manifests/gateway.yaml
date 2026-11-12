@@ -1,0 +1,37 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: netlab-eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: nginx-gateway
+  namespace: netlab
+spec:
+  gatewayClassName: netlab-eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces: {from: Same}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nginx
+  namespace: netlab
+spec:
+  parentRefs:
+    - name: nginx-gateway
+      sectionName: http
+  hostnames: [nginx.lab.test]
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /nginx}
+      backendRefs:
+        - name: nginx
+          port: 8080
