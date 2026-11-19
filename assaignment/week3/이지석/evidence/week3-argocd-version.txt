@@ -1,0 +1,9 @@
+$ kubectl get deployments,statefulsets -n argocd -o=custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[*].image
+NAME                               IMAGE
+argocd-applicationset-controller   quay.io/argoproj/argocd:v3.6.2
+argocd-dex-server                  ghcr.io/dexidp/dex:v2.46.0
+argocd-notifications-controller    quay.io/argoproj/argocd:v3.6.2
+argocd-redis                       public.ecr.aws/docker/library/redis:8.10.1-alpine
+argocd-repo-server                 quay.io/argoproj/argocd:v3.6.2
+argocd-server                      quay.io/argoproj/argocd:v3.6.2
+argocd-application-controller      quay.io/argoproj/argocd:v3.6.2

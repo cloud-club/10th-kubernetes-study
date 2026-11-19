@@ -1,0 +1,15 @@
+=== before-scale ===
+$ kubectl get deployment,rs,pods -n cicd-plain -o wide
+deployment.apps/nginx   1/1     1            1           4m35s   nginx        nginx:alpine   app=nginx
+replicaset.apps/nginx-5878ccc46b   1         1         1       4m35s   nginx        nginx:alpine   app=nginx,pod-template-hash=5878ccc46b
+
+=== after-scale ===
+$ kubectl get deployment,rs,pods -n cicd-plain -o wide
+deployment.apps/nginx   2/2     2            2           4m36s   nginx        nginx:alpine   app=nginx
+replicaset.apps/nginx-5878ccc46b   2         2         2       4m36s   nginx        nginx:alpine   app=nginx,pod-template-hash=5878ccc46b
+
+=== after-image ===
+$ kubectl get deployment,rs,pods -n cicd-plain -o wide
+deployment.apps/nginx   2/2     2            2           4m47s   nginx        nginx:1.27-alpine   app=nginx
+replicaset.apps/nginx-5878ccc46b   0         0         0       4m47s   nginx        nginx:alpine        app=nginx,pod-template-hash=5878ccc46b
+replicaset.apps/nginx-b94d8cf4f    2         2         2       10s     nginx        nginx:1.27-alpine   app=nginx,pod-template-hash=b94d8cf4f

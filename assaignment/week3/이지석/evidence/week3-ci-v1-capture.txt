@@ -1,0 +1,12 @@
+week3-ci-v1  |  namespace=cicd-ci
+
+저장된 Deployment JSON에서 추출
+Deployment image: ghcr.io/dev-jiseok/nginx-api:2fd1d557a21844cdbe3a3be3c7cea23c0fa6aed6
+
+저장된 Pod JSON에서 추출
+Pod: nginx-api-757b859fdb-6kmpk
+Pod image: ghcr.io/dev-jiseok/nginx-api:2fd1d557a21844cdbe3a3be3c7cea23c0fa6aed6
+imageID: ghcr.io/dev-jiseok/nginx-api@sha256:1d9d4f25e4f44500d50284e0bc403f2b2098a648365f4920c8775eed80ec25f9
+
+Service port-forward를 통해 수집한 HTTP 응답
+{"message":"hello from nginx","version":"v1"}

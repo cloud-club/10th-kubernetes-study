@@ -1,0 +1,12 @@
+$ kubectl get deployment,rs,pods -n cicd-plain -o wide
+NAME                    READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES              SELECTOR
+deployment.apps/nginx   2/2     2            2           4m47s   nginx        nginx:1.27-alpine   app=nginx
+
+NAME                               DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES              SELECTOR
+replicaset.apps/nginx-5878ccc46b   0         0         0       4m47s   nginx        nginx:alpine        app=nginx,pod-template-hash=5878ccc46b
+replicaset.apps/nginx-b94d8cf4f    2         2         2       10s     nginx        nginx:1.27-alpine   app=nginx,pod-template-hash=b94d8cf4f
+
+NAME                         READY   STATUS        RESTARTS   AGE   IP            NODE                    NOMINATED NODE   READINESS GATES
+pod/nginx-5878ccc46b-mw9ql   1/1     Terminating   0          11s   10.244.2.9    jiseok-netlab-worker    <none>           <none>
+pod/nginx-b94d8cf4f-kqw95    1/1     Running       0          10s   10.244.1.12   jiseok-netlab-worker2   <none>           <none>
+pod/nginx-b94d8cf4f-wxzwx    1/1     Running       0          5s    10.244.2.10   jiseok-netlab-worker    <none>           <none>

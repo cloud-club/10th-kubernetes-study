@@ -1,0 +1,5 @@
+$ kubectl get nodes -o wide
+NAME                          STATUS   ROLES           AGE    VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION     CONTAINER-RUNTIME
+jiseok-netlab-control-plane   Ready    control-plane   108s   v1.35.0   172.21.0.2    <none>        Debian GNU/Linux 12 (bookworm)   6.12.54-linuxkit   containerd://2.2.0
+jiseok-netlab-worker          Ready    <none>          93s    v1.35.0   172.21.0.3    <none>        Debian GNU/Linux 12 (bookworm)   6.12.54-linuxkit   containerd://2.2.0
+jiseok-netlab-worker2         Ready    <none>          93s    v1.35.0   172.21.0.4    <none>        Debian GNU/Linux 12 (bookworm)   6.12.54-linuxkit   containerd://2.2.0

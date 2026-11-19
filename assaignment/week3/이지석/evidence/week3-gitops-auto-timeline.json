@@ -1,0 +1,247 @@
+[
+  {
+    "observedAt": "2026-11-19T09:39:41Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:39:46Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:39:52Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:39:57Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:02Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:07Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:12Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:17Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:22Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:27Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:33Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:38Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:43Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:48Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:53Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:40:58Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:03Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:08Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:14Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:19Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:24Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:29Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:34Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:39Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:44Z",
+    "revision": "9f31dc469367a8f254bad738bbd6c9e6761d83b3",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:49Z",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2",
+    "sync": "Synced",
+    "health": "Progressing",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:931143126b7ebce575a0d39b55e2e1dcb29a8c2b",
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  },
+  {
+    "observedAt": "2026-11-19T09:41:54Z",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2",
+    "sync": "Synced",
+    "health": "Healthy",
+    "images": [
+      "ghcr.io/dev-jiseok/nginx-api:931143126b7ebce575a0d39b55e2e1dcb29a8c2b",
+      "ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc"
+    ]
+  }
+]

@@ -1,0 +1,18 @@
+저장된 Argo CD Application JSON에서 추출
+NAME        SYNC       HEALTH
+nginx-api   Synced     Healthy
+
+Revision: 9f31dc469367a8f254bad738bbd6c9e6761d83b3
+
+week3-gitops-initial  |  namespace=cicd-gitops
+
+저장된 Deployment JSON에서 추출
+Deployment image: ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc
+
+저장된 Pod JSON에서 추출
+Pod: nginx-api-6c48879f69-nkjjc
+Pod image: ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc
+imageID: ghcr.io/dev-jiseok/nginx-api@sha256:b534969185b3c6fda0c30438bdbc0b850df022b78f100b2180613e10b0bab3d5
+
+Service port-forward를 통해 수집한 HTTP 응답
+{"message":"hello from nginx","version":"v2"}

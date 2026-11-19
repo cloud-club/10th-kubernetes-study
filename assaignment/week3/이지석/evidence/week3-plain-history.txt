@@ -1,0 +1,5 @@
+$ kubectl rollout history deployment/nginx -n cicd-plain
+deployment.apps/nginx
+REVISION  CHANGE-CAUSE
+1         <none>
+2         <none>

@@ -1,0 +1,134 @@
+[
+  {
+    "time": "2026-11-19T09:43:58Z",
+    "phase": "before-off",
+    "gitReplicas": 1,
+    "liveReplicas": 1,
+    "readyReplicas": 1,
+    "selfHeal": false,
+    "sync": "Synced",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:43:58Z",
+    "phase": "selfHeal-off",
+    "gitReplicas": 1,
+    "liveReplicas": 3,
+    "readyReplicas": 1,
+    "selfHeal": false,
+    "sync": "Synced",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:03Z",
+    "phase": "selfHeal-off",
+    "gitReplicas": 1,
+    "liveReplicas": 3,
+    "readyReplicas": 2,
+    "selfHeal": false,
+    "sync": "OutOfSync",
+    "health": "Progressing",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:13Z",
+    "phase": "selfHeal-off",
+    "gitReplicas": 1,
+    "liveReplicas": 3,
+    "readyReplicas": 3,
+    "selfHeal": false,
+    "sync": "OutOfSync",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:28Z",
+    "phase": "selfHeal-off",
+    "gitReplicas": 1,
+    "liveReplicas": 3,
+    "readyReplicas": 3,
+    "selfHeal": false,
+    "sync": "OutOfSync",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:28Z",
+    "phase": "enable-selfHeal",
+    "gitReplicas": 1,
+    "liveReplicas": 3,
+    "readyReplicas": 3,
+    "selfHeal": true,
+    "sync": "OutOfSync",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:31Z",
+    "phase": "enable-selfHeal",
+    "gitReplicas": 1,
+    "liveReplicas": 1,
+    "readyReplicas": 1,
+    "selfHeal": true,
+    "sync": "Synced",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:31Z",
+    "phase": "selfHeal-on-repeat",
+    "gitReplicas": 1,
+    "liveReplicas": 3,
+    "readyReplicas": 1,
+    "selfHeal": true,
+    "sync": "Synced",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:33Z",
+    "phase": "selfHeal-on-repeat",
+    "gitReplicas": 1,
+    "liveReplicas": 3,
+    "readyReplicas": 3,
+    "selfHeal": true,
+    "sync": "OutOfSync",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:36Z",
+    "phase": "selfHeal-on-repeat",
+    "gitReplicas": 1,
+    "liveReplicas": 1,
+    "readyReplicas": 1,
+    "selfHeal": true,
+    "sync": "Synced",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:41Z",
+    "phase": "selfHeal-on-repeat",
+    "gitReplicas": 1,
+    "liveReplicas": 1,
+    "readyReplicas": 1,
+    "selfHeal": true,
+    "sync": "Synced",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  },
+  {
+    "time": "2026-11-19T09:44:52Z",
+    "phase": "selfHeal-on-repeat",
+    "gitReplicas": 1,
+    "liveReplicas": 1,
+    "readyReplicas": 1,
+    "selfHeal": true,
+    "sync": "Synced",
+    "health": "Healthy",
+    "revision": "c968b72881948efd8234790bcb9b01e42d71d6d2"
+  }
+]

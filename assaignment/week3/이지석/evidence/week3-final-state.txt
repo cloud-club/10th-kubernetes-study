@@ -1,0 +1,6 @@
+$ kubectl get deployment,pods -n cicd-gitops -o wide
+NAME                        READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES                                                                  SELECTOR
+deployment.apps/nginx-api   1/1     1            1           56m   nginx        ghcr.io/dev-jiseok/nginx-api:931143126b7ebce575a0d39b55e2e1dcb29a8c2b   app=nginx-api
+
+NAME                             READY   STATUS    RESTARTS   AGE   IP            NODE                   NOMINATED NODE   READINESS GATES
+pod/nginx-api-5bc66dc678-j72gs   1/1     Running   0          47m   10.244.2.12   jiseok-netlab-worker   <none>           <none>
