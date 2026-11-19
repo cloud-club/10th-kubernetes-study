@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: netlab
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: netlab
+data:
+  default.conf: |
+    server {
+      listen 8081;
+      access_log /dev/stdout;
+      location / {
+        default_type text/plain;
+        return 200 "$hostname $server_addr:$server_port uri=$request_uri\n";
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-a
+  namespace: netlab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: nginx-netlab, version: v1}
+  template:
+    metadata:
+      labels: {app: nginx-netlab, version: v1}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: netlab-worker
+      containers:
+        - name: nginx
+          image: nginx:1.28.0-alpine
+          ports:
+            - {name: http, containerPort: 8081}
+          readinessProbe:
+            httpGet: {path: /nginx, port: http}
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {memory: 96Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/nginx/conf.d, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: nginx-config}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-b
+  namespace: netlab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: nginx-netlab, version: v2}
+  template:
+    metadata:
+      labels: {app: nginx-netlab, version: v2}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: netlab-worker2
+      containers:
+        - name: nginx
+          image: nginx:1.28.0-alpine
+          ports:
+            - {name: http, containerPort: 8081}
+          readinessProbe:
+            httpGet: {path: /nginx, port: http}
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {memory: 96Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/nginx/conf.d, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: nginx-config}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client
+  namespace: netlab
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: netlab-worker
+  containers:
+    - name: client
+      image: nicolaka/netshoot:v0.14
+      command: [sleep, infinity]
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {memory: 128Mi}
