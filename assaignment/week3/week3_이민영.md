@@ -1,518 +1,498 @@
-# 3주차 과제: 쿠버네티스 네트워크와 Gateway API
+# 3주차 과제: Kubernetes CI/CD
+
+- 개인 실습 저장소(비공개): https://github.com/eraaster/k8s-cicd-lab
+- 이미지 패키지(공개): `ghcr.io/eraaster/nginx-api`
+- 저장소가 비공개라 워크플로와 배포 설정은 아래에 그대로 첨부했습니다. 토큰, 비밀번호, kubeconfig는 넣지 않았습니다.
 
 ## 수행 범위
 
-| 과제 | 기초 | 심화 |
-|---|---|---|
-| 과제 1 | 전부 수행 | tcpdump 패킷 경로 검증, 부하 분산 비율 측정은 수행. Service 생성 전후 비교, 백엔드 변경 관찰, iptables·IPVS·nftables 비교는 미수행 |
-| 과제 2 | 전부 수행 | 미수행: 관리 책임 분리·RBAC, YAML 매핑 비교, 전환 판단 |
-| 과제 3 | 전부 수행 | Nginx v1·v2 가중치 80:20은 미수행 |
+| 과제 | 수행 여부 |
+|---|---|
+| 과제 1. YAML·Kustomize·Helm 비교 | 수행 |
+| 과제 2. Actions·GHCR·Kubernetes 연동 | 수행 (v1 → v2 자동 배포 확인) |
+| 과제 3. Argo CD와 GitOps | 수행 (첫 Sync, 자동 동기화, v3 흐름 확인) |
+| 딥다이브 | 미수행 |
 
 ## 실습 환경
 
-Windows 노트북의 WSL2(Ubuntu)에 Docker Engine을 설치하고 그 위에 kind 클러스터를 만들었습니다. kind 노드는 컨테이너라서 노드끼리는 Docker 브리지(172.18.0.0/16)로 통신합니다. 물리 NIC나 스위치 구간은 이 환경에서 볼 수 없습니다.
+Windows 노트북의 WSL2(Ubuntu)에 Docker Engine을 깔고 kind로 단일 노드 클러스터 `cicd`를 만들었습니다. self-hosted runner도 같은 WSL에 등록했습니다.
 
-과제 1과 과제 3은 클러스터를 따로 썼습니다. 과제 3에서 Envoy Gateway를 v1.31 클러스터에 설치하지 못해 새로 만들었기 때문입니다(아래 트러블슈팅 참고).
-
-| 항목 | 과제 1 (`netlab`) | 과제 3 (`gw`) |
-|---|---|---|
-| kind | v0.24.0 | v0.33.0 |
-| Kubernetes (서버) | v1.31.0 | v1.37.0 |
-| kubectl | v1.37.2 (서버와 버전 차이 경고 있음) | v1.37.2 |
-| 노드 구성 | control-plane 1, worker 2 | control-plane 1 |
-| 노드 OS / 런타임 | Debian 12 / containerd 1.7.18 | Debian 13 / containerd 2.3.4 |
-| 커널 | 6.18.33.2-microsoft-standard-WSL2 | 같음 |
-| CNI | kindnet (`ptp` + `host-local` + `portmap`, `ipMasq: false`) | kindnet |
-| kube-proxy 모드 | iptables | iptables |
-| Pod CIDR | `10.244.0.0/16` (control-plane `.0.0/24`, worker2 `.1.0/24`, worker `.2.0/24`) | `10.244.0.0/16` |
-| Envoy Gateway | - | v1.10.0 |
-| Gateway API CRD | - | v1.6.1 |
-| Envoy Proxy | - | distroless-v1.40.2 |
-
-![클러스터 버전과 노드](./week3_mylee_img/01_cluster_env.png)
-![CNI와 kube-proxy 설정](./week3_mylee_img/02_cni_kubeproxy.png)
-
-# 과제 1. Nginx로 알아보는 Pod 통신과 Service 동작 원리
-
-## 1. Pod와 Service 구성 확인
-
-client와 nginx-a는 `netlab-worker`(워커 A), nginx-b는 `netlab-worker2`(워커 B)에 nodeSelector로 배치했습니다. YAML은 문서 끝의 `lab.yaml`입니다.
-
-| Pod | Pod IP | 노드 |
-|---|---|---|
-| client | 10.244.2.2 | netlab-worker |
-| nginx-a | 10.244.2.3 | netlab-worker |
-| nginx-b | 10.244.1.2 | netlab-worker2 |
-
-Service `web`은 ClusterIP `10.96.191.35`, port 80, targetPort 80, selector `app=web`입니다. EndpointSlice `web-ssbwg`에는 `10.244.1.2`, `10.244.2.3`이 등록돼 있었고, 각각 nginx-b와 nginx-a의 Pod IP입니다.
-
-```bash
-kubectl get pods -o wide
-kubectl get svc web -o yaml
-kubectl get endpointslice -l kubernetes.io/service-name=web -o wide
-```
-
-![Pod, Service, EndpointSlice](./week3_mylee_img/03_pods_svc_eps.png)
-
-## 2. 같은 노드와 다른 노드의 Pod 간 통신
-
-client Pod에서 네 가지로 요청했고 모두 200이 나왔습니다.
-
-| 요청 대상 | 값 | 결과 |
-|---|---|---|
-| nginx-a Pod IP (같은 노드) | 10.244.2.3 | 200 |
-| nginx-b Pod IP (다른 노드) | 10.244.1.2 | 200 |
-| Service ClusterIP | 10.96.191.35 | 200 |
-| Service DNS 이름 | web.default.svc.cluster.local | 200 |
-
-![네 가지 요청 결과](./week3_mylee_img/04_curl_4.png)
-
-### CNI 구성
-
-`netlab-worker`의 `ip link`에는 `lo`, `eth0`, 그리고 Pod마다 하나씩 붙은 veth만 있었습니다. `cni0` 같은 브리지나 vxlan 인터페이스는 없습니다. CNI 설정을 보면 타입이 `ptp`(Pod마다 veth 쌍, 브리지 없음)이고 `ipMasq`는 `false`입니다.
-
-`netlab-worker`의 라우팅 테이블입니다.
-
-```
-10.244.0.0/24 via 172.18.0.4 dev eth0
-10.244.1.0/24 via 172.18.0.2 dev eth0
-10.244.2.2 dev vethcdbd5d4d scope host
-10.244.2.3 dev vethb69b5d34 scope host
-172.18.0.0/16 dev eth0 proto kernel scope link src 172.18.0.3
-```
-
-같은 노드의 Pod는 `/32` 경로로 veth에 바로 연결되고, 다른 노드의 Pod 대역은 그 노드 IP를 next hop으로 보냅니다. 터널은 쓰지 않습니다. 노드 사이 경로는 CNI 설정 파일이 아니라 kindnet 데몬이 노드마다 넣어 둔 것입니다.
-
-![ip route, ip link](./week3_mylee_img/05_ip_route_link.png)
-
-### 경로 그림
-
-```
-[같은 노드: client → nginx-a]
-client eth0 ─ vethcdbd5d4d ─ (노드 L3 라우팅, /32 경로) ─ vethb69b5d34 ─ nginx-a eth0
-
-[다른 노드: client → nginx-b]
-client eth0 ─ vethcdbd5d4d ─ (노드 라우팅: 10.244.1.0/24 via 172.18.0.2)
-  ─ netlab-worker eth0(172.18.0.3) ═ Docker 네트워크(172.18.0.0/16) ═ netlab-worker2 eth0(172.18.0.2)
-  ─ (노드 라우팅) ─ veth ─ nginx-b eth0
-
-[Service 경유]
-요청할 때 노드 커널이 ClusterIP:80 을 Pod IP:80 으로 DNAT, 응답은 conntrack이 되돌림
-```
-
-## 3. Service는 어떻게 동작할까요?
-
-### selector와 EndpointSlice는 백엔드 연결에 어떻게 관여하나요?
-
-selector(`app=web`)로 라벨이 맞는 Pod를 고르고, EndpointSlice 컨트롤러가 그중 Ready인 Pod의 IP와 포트를 EndpointSlice에 적습니다. 실습에서도 EndpointSlice 주소 두 개가 nginx-a, nginx-b의 Pod IP와 같았습니다. kube-proxy는 이 EndpointSlice를 보고 노드에 규칙을 만듭니다.
-
-### Pod IP 직접 접근과 ClusterIP 접근은 무엇이 다른가요?
-
-Pod IP는 veth에 실제로 붙어 있는 주소라서 라우팅만으로 닿습니다. ClusterIP는 어느 인터페이스에도 없는 가상 IP이고, 노드의 netfilter 규칙이 목적지를 Pod IP로 바꿔 줘야 통신이 됩니다. Pod가 다시 만들어지면 Pod IP는 바뀌지만 ClusterIP는 그대로입니다.
-
-### ClusterIP로 보낸 요청의 목적지 주소와 포트는 어떻게 바뀌나요?
-
-Pod에서 나온 패킷이 노드의 PREROUTING에 들어오면 `KUBE-SERVICES`에서 `10.96.191.35:80`이 매칭되어 `KUBE-SVC-*`로 넘어가고, 고른 `KUBE-SEP-*`에서 `DNAT --to-destination <Pod IP>:80`이 적용됩니다. tcpdump로 보면 client 쪽 veth에서는 목적지가 ClusterIP였고 nginx 쪽 veth에서는 Pod IP였습니다. 그 사이, 즉 노드 커널에서 주소가 바뀐다는 뜻입니다. 응답은 conntrack에 남은 기록대로 출발지가 다시 ClusterIP로 바뀌어 client에 도착합니다.
-
-### 여러 백엔드 중 요청을 받을 대상은 어떻게 고르나요?
-
-`KUBE-SVC-*` 체인에서 `statistic --mode random --probability 0.5` 규칙이 먼저 평가되어 절반 확률로 nginx-b로 가고, 거기 걸리지 않으면 조건 없는 마지막 규칙이 nginx-a로 보냅니다. 새 TCP 연결의 첫 패킷마다 따로 정하고, 번갈아 보내는 방식은 아닙니다. 100번 요청했을 때는 nginx-a 49, nginx-b 51이었고 1000번에서는 nginx-a 499, nginx-b 501이었습니다. 처음 100번을 돌렸을 때는 40:60이 나온 적도 있어서, 적은 횟수에서는 한쪽으로 꽤 쏠릴 수 있다는 것도 같이 봤습니다.
-
-### kube-proxy의 역할과 iptables 모드에서 패킷을 처리하는 주체는?
-
-kube-proxy는 Service와 EndpointSlice가 바뀌는 것을 보고 노드에 iptables 규칙을 넣고 고칩니다. 패킷을 실제로 바꾸는 건 커널의 netfilter입니다. 과제 3 클러스터에서 kube-proxy가 죽어 있을 때 `10.96.0.1:443` 접속이 timeout 났고, kube-proxy를 살리자 바로 접속됐습니다. 규칙이 없으면 ClusterIP가 동작하지 않는다는 걸 직접 확인한 셈입니다.
-
-### DNS 이름으로 요청하면 DNS는 어느 단계에 관여하나요?
-
-CoreDNS가 `web.default.svc.cluster.local`을 `10.96.191.35`로 바꿔 주는 처음 단계에만 관여합니다. 그다음부터는 ClusterIP로 직접 요청한 것과 똑같이 흘러가고, 실습에서도 두 방식 모두 200이었습니다.
-
-## 4. Service 관련 iptables 규칙
-
-client가 있는 `netlab-worker`에서 확인했습니다.
-
-```bash
-docker exec netlab-worker iptables-save -t nat | grep -E "default/web|KUBE-SERVICES"
-docker exec netlab-worker iptables -t nat -nvL KUBE-SVC-LOLE4ISW44XBNF3G --line-numbers
-```
-
-| 확인할 내용 | 실제 규칙 |
+| 항목 | 버전 |
 |---|---|
-| ClusterIP와 포트 매칭 | `KUBE-SERVICES -d 10.96.191.35/32 -p tcp --dport 80 -j KUBE-SVC-LOLE4ISW44XBNF3G` |
-| 백엔드 선택 | `KUBE-SVC-LOLE4...`에서 `statistic --mode random --probability 0.5`면 `KUBE-SEP-MQ4W7Q2CV67URU6Q`(nginx-b), 아니면 `KUBE-SEP-7QE66YRUUVCO6FRM`(nginx-a) |
-| DNAT | `KUBE-SEP-MQ4W...`: `DNAT --to-destination 10.244.1.2:80`, `KUBE-SEP-7QE6...`: `DNAT --to-destination 10.244.2.3:80` |
+| 클러스터 | kind `cicd` (control-plane 1개) |
+| kind | v0.33.0 |
+| Kubernetes (서버) | v1.37.0 |
+| kubectl | v1.37.2 |
+| Helm | v3.22.1 |
+| Docker Engine | 29.9.3 |
+| Argo CD | v3.6.2 (stable 매니페스트) |
+| GitHub Actions runner | GitHub-hosted `ubuntu-latest`(빌드), self-hosted Linux x64(배포) |
+| 과제 1 이미지 | `nginx:alpine` (Helm 확인용 `nginx:1.27-alpine`) |
+| 과제 2·3 베이스 이미지 | `nginx:alpine` |
 
-처리 순서입니다.
+# 과제 1. 일반 YAML, Kustomize, Helm 비교
+
+## 구성
 
 ```
-PREROUTING / OUTPUT → KUBE-SERVICES (dst 10.96.191.35:80 매칭)
-  → KUBE-SVC-LOLE4... : ① ! -s 10.244.0.0/16 이면 KUBE-MARK-MASQ (클러스터 밖에서 온 경우만)
-                        ② 50% → KUBE-SEP-MQ4W... (nginx-b)
-                        ③ 나머지 → KUBE-SEP-7QE6... (nginx-a)
-    → KUBE-SEP-* : DNAT로 목적지를 Pod IP:80 으로 변경
+deploy/
+├── plain/                  deployment.yaml, service.yaml
+├── kustomize/
+│   ├── base/               deployment.yaml, service.yaml, kustomization.yaml
+│   └── overlays/
+│       ├── dev/            replicas 1
+│       └── prod/           replicas 2
+└── helm/nginx/             Chart.yaml, values.yaml, templates/
 ```
 
-`KUBE-SEP-*`의 `-s <자기 Pod IP> -j KUBE-MARK-MASQ`는 Pod가 자기 자신이 백엔드인 Service로 요청할 때(hairpin)를 위한 규칙입니다.
+세 방식 모두 Deployment `nginx`(이미지 `nginx:alpine`, 포트 80)와 ClusterIP Service `nginx`(port 80 → targetPort 80)를 만듭니다. 공통 YAML에는 namespace를 넣지 않고 배포할 때 지정했습니다.
 
-캡처 시점의 카운터는 규칙 1이 0, 규칙 2(nginx-b)가 570, 규칙 3(nginx-a)이 545였습니다. 실습 내내 보낸 요청이 누적된 값입니다. client(10.244.2.2)는 Pod 대역 안에서 출발하니 규칙 1에는 걸리지 않습니다. NAT 카운터는 새 연결의 첫 패킷에서만 올라가서 HTTP 요청 수와 같다고 보면 안 됩니다. 이 실습에서는 curl이 요청마다 연결을 새로 맺어서 숫자가 요청 수에 가깝게 나왔을 뿐입니다. 처음 12번 요청했을 때는 5:7이었는데, 요청이 쌓이면서 570:545로 비슷해졌습니다.
+```bash
+kubectl apply -n cicd-plain -f deploy/plain/
+kubectl apply -n cicd-kustomize -k deploy/kustomize/overlays/dev/
+helm upgrade --install nginx deploy/helm/nginx -n cicd-helm
 
-![iptables-save 결과](./week3_mylee_img/06_iptables_save.png)
-![KUBE-SVC 체인 카운터](./week3_mylee_img/07_iptables_counter.png)
+kubectl -n cicd-plain port-forward svc/nginx 18080:80
+curl -s localhost:18080 | grep -i title
+# <title>Welcome to nginx!</title>
+```
 
-## 심화: tcpdump로 패킷 경로 확인
+세 namespace 모두 같은 방식으로 Nginx 기본 페이지를 확인했습니다.
 
-`netlab-worker`에서 `-i any`로 잡았습니다. In/Out은 노드 네트워크 네임스페이스 기준입니다.
+## 생성된 YAML 확인
 
-| 상황 | 캡처 위치 | 방향 | 출발지 → 목적지 |
+```bash
+kubectl kustomize deploy/kustomize/overlays/dev  > rendered/kustomize-dev.yaml
+kubectl kustomize deploy/kustomize/overlays/prod > rendered/kustomize-prod.yaml
+helm template nginx deploy/helm/nginx > rendered/helm.yaml
+helm template nginx deploy/helm/nginx --set replicaCount=2 --set image.tag=1.27-alpine > rendered/helm-custom.yaml
+grep -H -E "replicas|image:" rendered/*.yaml
+```
+
+```
+rendered/helm-custom.yaml:  replicas: 2
+rendered/helm-custom.yaml:        image: "nginx:1.27-alpine"
+rendered/helm.yaml:  replicas: 1
+rendered/helm.yaml:        image: "nginx:alpine"
+rendered/kustomize-dev.yaml:  replicas: 1
+rendered/kustomize-dev.yaml:      - image: nginx:alpine
+rendered/kustomize-prod.yaml:  replicas: 2
+rendered/kustomize-prod.yaml:      - image: nginx:alpine
+```
+
+세 방식 모두 최종적으로는 같은 Deployment와 Service 두 개를 만듭니다. 다른 점은 도구가 붙이는 메타데이터 정도입니다. Kustomize overlay는 `env: dev`/`env: prod` 라벨을 더하고, Helm은 `app.kubernetes.io/managed-by: Helm`, `helm.sh/chart` 라벨과 릴리스 이름을 리소스 이름으로 씁니다. Kubernetes 입장에서는 어떤 도구로 만들었는지와 상관없이 같은 리소스를 받습니다.
+
+## 비교
+
+| 비교 항목 | 일반 YAML | Kustomize | Helm |
 |---|---|---|---|
-| 다른 노드 (nginx-b) | vethcdbd5d4d In | 요청 | 10.244.2.2 → 10.244.1.2 |
-| | eth0 Out | 요청 | 10.244.2.2 → 10.244.1.2 |
-| | eth0 In | 응답 | 10.244.1.2 → 10.244.2.2 |
-| 같은 노드 (nginx-a) | vethcdbd5d4d In | 요청 | 10.244.2.2 → 10.244.2.3 |
-| | vethb69b5d34 Out | 요청 | 10.244.2.2 → 10.244.2.3 |
-| Service 경유 | vethcdbd5d4d In | 요청 | 10.244.2.2 → 10.96.191.35 |
-| | vethb69b5d34 Out | 요청 | 10.244.2.2 → 10.244.2.3 |
-| | vethcdbd5d4d Out | 응답 | 10.96.191.35 → 10.244.2.2 |
+| 공통 설정 재사용 | 파일을 복사해서 씀 | `base`를 overlay가 `resources`로 참조 | 템플릿 하나에 values를 바꿔 넣음 |
+| dev/prod 나누기 | 디렉터리를 통째로 복사해 각각 수정 | overlay마다 바뀌는 부분만 적음(`replicas`, 라벨) | `values-dev.yaml`, `values-prod.yaml` 또는 `--set` |
+| 이미지·replicas 변경 위치 | Deployment YAML 본문 | overlay의 `replicas`, `images` 필드 | `values.yaml`의 `replicaCount`, `image.tag` |
+| 장점 | 바로 읽히고 도구가 필요 없음 | 원본 YAML을 그대로 두고 차이만 관리. `kubectl -k` 내장 | 값으로 바꾸는 범위가 넓고, 릴리스 단위로 설치·업그레이드·롤백 가능 |
+| 불편했던 점 | 환경이 늘면 같은 내용이 여러 곳에 생김 | 조건문이나 반복 같은 로직이 없음 | 템플릿 문법(`{{ }}`) 때문에 YAML이 읽기 어렵고, 최종 결과를 `helm template`으로 따로 봐야 함 |
+| 언제 쓸지 | 리소스가 적고 환경이 하나일 때 | 우리 팀 앱을 환경별로 조금씩 다르게 배포할 때 | 남에게 배포할 패키지나, 설정값이 많은 외부 앱(Argo CD, 모니터링 등)을 설치할 때 |
 
-다른 노드로 갈 때 `eth0`에서도 TCP 패킷이 주소 그대로 보였고 VXLAN 헤더가 없었습니다. `ip link`에 터널 인터페이스가 없던 것과 맞습니다. 같은 노드끼리는 veth 두 개 사이에서만 오가고 `eth0`에는 한 번도 안 나타났습니다. Service 경유는 nginx-a가 고른 경우만 잡았고, nginx-b로 DNAT되는 경우는 캡처하지 못했습니다.
+# 과제 2. 개인 GitHub Actions·GHCR·Kubernetes 연동
 
-![다른 노드 tcpdump](./week3_mylee_img/08_tcpdump_other_node.png)
-![같은 노드 tcpdump](./week3_mylee_img/09_tcpdump_same_node.png)
-![Service 경유 tcpdump](./week3_mylee_img/10_tcpdump_svc.png)
+## 연결 구조
 
-## 심화: 부하 분산 비율
+```
+소스 push (main, app/**)
+  → [build] GitHub-hosted runner: buildx로 linux/amd64,linux/arm64 빌드
+           → ghcr.io/eraaster/nginx-api:<전체 github.sha> push (GITHUB_TOKEN)
+  → [deploy] 내 WSL의 self-hosted runner
+           → kubectl --context kind-cicd 로 cicd-ci 에 적용
+  → kind 노드가 GHCR(Public)에서 이미지 pull → Pod 실행
+```
 
-client Pod 안에서 `curl -s http://web`을 반복하고 `sort | uniq -c`로 셌습니다. curl이 매번 새 연결을 맺어서 연결마다 백엔드가 따로 정해집니다.
+GitHub-hosted runner는 내 노트북의 kind API에 접근할 수 없어서 job을 둘로 나눴습니다. 빌드 job이 만든 이미지 주소는 job output(`needs.build.outputs.image`)으로 배포 job에 넘겼습니다. 배포 job은 `runs-on: [self-hosted, linux]`라서 내 WSL의 runner에서만 돕니다. runner가 claire 계정으로 실행되어 `~/.kube/config`의 `kind-cicd` context를 그대로 씁니다. 이 runner는 비공개 저장소의 main push에만 쓰고, 외부 PR은 받지 않습니다.
+
+runner 등록은 토큰을 화면에서 복사하지 않고 `gh`로 받았습니다.
 
 ```bash
-kubectl exec client -- sh -c 'for i in $(seq 1 100); do curl -s http://web; done' | sort | uniq -c
-kubectl exec client -- sh -c 'for i in $(seq 1 1000); do curl -s http://web; done' | sort | uniq -c
+TOKEN=$(gh api -X POST repos/eraaster/k8s-cicd-lab/actions/runners/registration-token --jq .token)
+./config.sh --url https://github.com/eraaster/k8s-cicd-lab --token "$TOKEN" --unattended --name wsl-kind
+./run.sh
 ```
 
-| 요청 횟수 | nginx-a | nginx-b |
-|---|---|---|
-| 100 (첫 측정) | 40 | 60 |
-| 100 (재측정) | 49 | 51 |
-| 1000 | 499 | 501 |
-
-100번일 때 표준편차가 5(√(100×0.5×0.5))라서 첫 측정의 40:60은 기대값에서 2σ쯤 벗어난 결과였고, 다시 돌리니 49:51이 나왔습니다. 1000번으로 늘리면 표준편차가 약 16이고 결과도 499:501로 거의 반반이었습니다. 첫 측정은 스크린샷이 없고, 이미지는 재측정 결과입니다. 연결마다 확률로 고르는 방식이라 적은 횟수에서 딱 반반이 안 나오는 건 정상입니다.
-
-![부하 분산 측정](./week3_mylee_img/11_lb_ratio.png)
-
-## 하지 못한 것
-
-- 심화 중 Service 생성 전후 iptables 비교, 백엔드 변경 관찰, iptables·IPVS·nftables 비교는 하지 못했습니다.
-- Service 경유 tcpdump에서 nginx-b로 가는 경우는 잡지 못했습니다.
-- kind 노드가 WSL2 커널 위의 컨테이너라 물리 NIC·스위치 구간은 확인할 수 없었습니다.
-
-# 과제 2. Ingress의 한계와 Gateway API로 전환하는 이유
-
-공식 문서 [Migrating from Ingress](https://gateway-api.sigs.k8s.io/guides/getting-started/migrating-from-ingress/)를 읽고 기초 항목을 정리했습니다. 과제 3에서 직접 구성해 본 리소스를 예로 들었습니다.
-
-## 1. Ingress와 Ingress controller
-
-Ingress는 "이 호스트와 경로로 들어온 요청은 이 Service로 보낸다"는 규칙만 적어 둔 API 리소스입니다. 혼자서는 아무 일도 하지 않습니다. 이 규칙을 읽고 실제로 트래픽을 받는 프록시(ingress-nginx, Traefik 등)를 띄워 설정하는 쪽이 Ingress controller입니다. 그래서 Ingress만 만들고 컨트롤러를 설치하지 않으면 아무 동작도 하지 않습니다. 어떤 컨트롤러가 이 Ingress를 처리할지는 `ingressClassName`으로 정합니다.
-
-과제 3과 비교하면 Ingress는 HTTPRoute 같은 설정 객체이고, Ingress controller는 Envoy Gateway(설정 해석)와 Envoy Proxy(트래픽 처리)를 합쳐 놓은 자리에 해당합니다.
-
-## 2. Ingress API 기본 기능과 컨트롤러별 확장
-
-공식 문서는 Ingress API가 "TLS 종료와 단순한 콘텐츠 기반 HTTP 라우팅만 지원한다"고 설명합니다.
-
-| 구분 | 내용 |
-|---|---|
-| Ingress API 기본 기능 | 호스트 매칭, 경로 매칭(`Prefix`, `Exact`, `ImplementationSpecific`), Service 백엔드 지정, TLS Secret을 이용한 TLS 종료, 기본 백엔드 |
-| 컨트롤러별 확장 (주로 annotation) | HTTP→HTTPS 리다이렉트, URL 재작성, 헤더 추가·삭제, 가중치 기반 트래픽 분할, 헤더·쿼리·메서드 매칭, 타임아웃·재시도, 인증, rate limit 등 |
-
-과제 3에서 쓴 `/app` → `/` 경로 재작성도 Ingress에서는 ingress-nginx의 `nginx.ingress.kubernetes.io/rewrite-target` 같은 annotation으로 해야 하는 기능입니다. Gateway API에서는 HTTPRoute의 `URLRewrite` 필터라는 표준 필드로 썼습니다.
-
-## 3. annotation에 의존할 때 생기는 문제
-
-- 이식성: annotation 이름과 의미가 컨트롤러마다 다릅니다. ingress-nginx용 annotation은 다른 컨트롤러에서 무시되거나 다르게 동작하므로, 컨트롤러를 바꾸면 Ingress를 다시 써야 합니다. 공식 문서도 annotation 방식의 확장은 이식성을 떨어뜨린다고 적고 있습니다.
-- 검증이 안 됨: annotation 값은 그냥 문자열이라 API 서버가 스키마로 검사하지 못합니다. 오타가 나도 생성은 성공하고, 컨트롤러가 조용히 무시하면 원인을 찾기 어렵습니다.
-- 유지보수: 기능이 늘수록 annotation이 쌓여 Ingress 하나에 설정이 몰립니다. 어떤 annotation이 어떤 규칙에 적용되는지(Ingress 전체인지 경로 하나인지)도 컨트롤러마다 해석이 달라 읽기 어렵습니다.
-- 규칙 병합: 여러 Ingress가 같은 호스트를 쓸 때 어떻게 합치고 충돌을 처리할지 Ingress API는 정하지 않고 컨트롤러에 맡깁니다. Gateway API는 구현체가 정해진 방식(더 구체적인 매칭 우선 등)으로 병합하도록 규정합니다.
-
-## 4. GatewayClass, Gateway, HTTPRoute
-
-| 리소스 | 역할 | 주로 관리하는 사람 | 과제 3 예 |
-|---|---|---|---|
-| GatewayClass | 어떤 컨트롤러가 Gateway를 구현할지 정함. Ingress의 IngressClass와 비슷한 위치 | 인프라 제공자 | `eg` → `gateway.envoyproxy.io/gatewayclass-controller` |
-| Gateway | 진입점 정의. 리스너(포트, 프로토콜, 호스트명, TLS)를 명시 | 클러스터 운영자 | `eg`, 포트 80 HTTP 리스너 |
-| HTTPRoute | 호스트·경로 매칭, 필터, 백엔드 지정 | 애플리케이션 개발자 | `nginx-route`, `nginx.example.com`, `/app` 재작성 |
-
-관계는 `GatewayClass ← gatewayClassName ← Gateway ← parentRefs ← HTTPRoute → backendRefs → Service` 순서입니다. Ingress는 진입점(HTTP·HTTPS 포트)이 컨트롤러에 암묵적으로 정해져 있지만, Gateway API는 진입점을 Gateway에 직접 적어야 합니다. 라우트는 HTTPRoute로 따로 떼어져 있어서 Gateway 하나에 여러 팀의 HTTPRoute가 붙을 수 있습니다. 실습에서도 Gateway `eg`에 `backend`, `nginx-route` 두 개가 붙어 `attachedRoutes: 2`로 나왔습니다.
-
-## 5. Ingress API와 Gateway API 비교
-
-| 기준 | Ingress API | Gateway API |
-|---|---|---|
-| 기능 | 호스트·경로 라우팅, TLS 종료 정도 | Ingress 기능에 더해 리다이렉트, URL 재작성, 헤더 조작, 가중치 분할, 헤더·쿼리·메서드 매칭이 표준 필드. HTTP 외 TCP·UDP·gRPC 등 라우트 종류도 따로 있음 |
-| 확장 방식 | annotation, 비 Service 백엔드 | `extensionRef` 같은 명시적 참조, Policy attachment, 구현체별 지원 수준(Core / Extended / Implementation-specific)을 문서화. Gateway API 리소스에 annotation으로 기능을 넣는 건 권장하지 않음 |
-| 관리 책임 | 사실상 한 리소스에 진입점·TLS·라우팅이 모두 있어 한 사람(또는 팀)이 함께 관리 | 인프라 제공자, 클러스터 운영자, 앱 관리자, 앱 개발자 네 역할로 나뉨. 리소스가 나뉘어 있어 RBAC로 역할별 권한을 줄 수 있음 |
-| 진입점 | 컨트롤러가 암묵적으로 제공 | Gateway 리스너에 명시 |
-| 규칙 병합·충돌 | 컨트롤러마다 다름 | 표준에서 병합 방식을 규정 |
-| 기본 백엔드 | `defaultBackend` 필드 | 직접 대응 필드 없음. `/` PathPrefix 규칙으로 대신함 |
-
-## 하지 못한 것
-
-심화(관리 책임 분리와 RBAC 연결, 공식 문서 YAML의 필드 매핑, 전환 판단)는 하지 못했습니다.
-
-
-# 과제 3. Envoy Gateway로 Gateway API 적용하기
-
-## 1. 설치
-
-과제 3은 새로 만든 `gw` 클러스터(K8s v1.37.0)에서 했습니다.
-
-```bash
-helm install eg oci://docker.io/envoyproxy/gateway-helm \
-  --version v1.10.0 -n envoy-gateway-system --create-namespace --wait
-
-kubectl apply -f https://github.com/envoyproxy/gateway/releases/download/v1.10.0/quickstart.yaml -n default
-```
-
-공식 호환 매트릭스에서 v1.10은 Gateway API v1.6.1, Envoy Proxy v1.40.x, Kubernetes v1.34~v1.37 조합입니다. 설치된 버전도 Gateway API CRD 번들 v1.6.1, Envoy Proxy distroless-v1.40.2로 맞았습니다.
-
-![Envoy Gateway 설치와 버전](./week3_mylee_img/12_eg_install.png)
-
-## 2. GatewayClass, Gateway, HTTPRoute 구성
-
-Quickstart로 `GatewayClass eg`, `Gateway eg`, 예제 앱용 `HTTPRoute backend`를 만들어 먼저 동작을 확인했습니다. 그다음 기존 Nginx를 백엔드로 하는 `nginx-route`를 추가했습니다(`nginx-gw.yaml`). kind에는 LoadBalancer가 없어서 Quickstart에 나온 대로 포트포워딩으로 들어갔습니다.
-
-```bash
-export ENVOY_SERVICE=$(kubectl get svc -n envoy-gateway-system \
-  --selector=gateway.envoyproxy.io/owning-gateway-namespace=default,gateway.envoyproxy.io/owning-gateway-name=eg \
-  -o jsonpath='{.items[0].metadata.name}')
-kubectl -n envoy-gateway-system port-forward service/${ENVOY_SERVICE} 8888:80 &
-```
-
-Quickstart 요청(`Host: www.example.com`, `/get`)은 200 OK였고, 응답 본문에 `backend` Pod 이름과 Envoy가 붙인 `X-Forwarded-For`, `X-Envoy-External-Address` 헤더가 보였습니다. 포트포워딩 로그에 `8888 -> 10080`으로 찍힌 건 Envoy Service의 80 포트가 Envoy 리스너 포트 10080으로 연결돼 있어서입니다.
-
-![Quickstart 요청 결과](./week3_mylee_img/14_quickstart_curl.png)
-
-## 3. 호스트·경로 기반 라우팅
-
-`nginx-route`는 호스트가 `nginx.example.com`일 때만 동작합니다. `/app`으로 들어오면 `URLRewrite`(`ReplacePrefixMatch: /`)로 `/`로 바꿔서 보내고, `/`는 그대로 `web` Service로 보냅니다. Nginx는 `/app` 경로를 모르기 때문에 경로를 바꿔야 응답합니다.
-
-| 요청 | 결과 |
-|---|---|
-| `Host: nginx.example.com`, `/` | `hello from nginx` |
-| `Host: nginx.example.com`, `/app` | `hello from nginx` (`/`로 바뀌어 전달) |
-| `Host: other.example.com`, `/` | 404 (맞는 HTTPRoute 호스트가 없음) |
-
-![Nginx 라우팅 결과](./week3_mylee_img/15_nginx_route_curl.png)
-
-## 4. 상태 조건
-
-| 리소스 | 조건 |
-|---|---|
-| GatewayClass `eg` | `Accepted=True` |
-| HTTPRoute `backend`, `nginx-route` | `Accepted=True`, `ResolvedRefs=True` |
-| Gateway `eg` 리스너 | `Programmed=True`, `attachedRoutes: 2` |
-| Gateway `eg` 전체 | `Programmed=False`, reason `AddressNotAssigned` |
-
-Gateway 전체가 `Programmed=False`인 건 주소를 못 받아서입니다. Envoy Proxy Service(`envoy-default-eg-...`)가 `LoadBalancer` 타입인데 kind에는 이걸 처리할 구현이 없어서 `EXTERNAL-IP`가 계속 `<pending>`이고, 그래서 Gateway에 주소가 할당되지 않았습니다. 리스너는 `Programmed=True`이고 포트포워딩으로 보낸 요청이 200과 404로 제대로 나뉘었으니 Envoy 쪽 설정은 정상 반영된 상태입니다.
-
-![Gateway API 리소스 상태](./week3_mylee_img/13_gw_status.png)
-
-## 5. 구성 요소 역할
-
-| 구성 요소 | 종류 | 역할 |
-|---|---|---|
-| GatewayClass `eg` | API 리소스 | 어떤 컨트롤러가 Gateway를 구현할지 지정 |
-| Gateway `eg` | API 리소스 | 포트 80 HTTP 리스너 같은 공통 진입점 정의. 운영자가 관리 |
-| HTTPRoute | API 리소스 | 호스트·경로 규칙과 백엔드 지정. 개발팀이 관리하고 `parentRefs`로 Gateway에 붙음 |
-| Envoy Gateway | 컨트롤러 | 위 리소스를 읽어 Envoy 설정(xDS)으로 바꾸고 Gateway마다 Envoy Proxy Pod를 만듦. 트래픽은 직접 받지 않음 |
-| Envoy Proxy | 데이터 플레인 | 실제 HTTP 요청을 받아 Host와 경로를 보고 백엔드로 넘김 |
-| Service `envoy-default-eg-...` | Service | Envoy Proxy Pod의 진입 주소. 실습에서는 포트포워딩 대상 |
-| Service `web` | Service | Nginx Pod의 ClusterIP |
-| Nginx Pod | 워크로드 | 최종 응답 |
-
-## 6. 요청 경로 그림
-
-```
-[요청 경로: 실제 패킷이 지나가는 길]
-curl (Host: nginx.example.com)
-  │ localhost:8888
-  ▼
-kubectl port-forward  (kind에 LoadBalancer가 없어 이 방법으로 진입)
-  ▼
-Service envoy-default-eg-... :80 ──► Envoy Proxy Pod :10080
-                                       │ ① 호스트 nginx.example.com 매칭
-                                       │ ② /app 이면 / 로 재작성
-                                       ▼
-                                  Service web (ClusterIP, kube-proxy iptables DNAT)
-                                       ▼
-                                  Nginx Pod :80
-
-[설정 경로: 트래픽은 여기를 지나가지 않음]
-GatewayClass / Gateway / HTTPRoute ──(watch)──► Envoy Gateway ──(xDS)──► Envoy Proxy
-```
-
-GatewayClass, Gateway, HTTPRoute는 설정 객체라서 패킷이 거쳐 가지 않습니다. 실제로 요청을 받아 넘기는 건 Envoy Proxy입니다.
-
-## 트러블슈팅
-
-처음에는 과제 1 클러스터와 같은 K8s v1.31에 Envoy Gateway v1.9.1을 설치하려 했는데 CRD 등록에서 실패했습니다. Gateway API CRD의 CEL 검증 규칙 `format.dns1123Label()`을 v1.31 API 서버가 몰라서 `undeclared reference to 'format'` 에러가 났습니다. 호환 매트릭스를 보니 v1.9는 K8s 1.33 이상에서 검증된 버전이었고, 그래서 kind를 v0.33.0으로 올리고 K8s v1.37.0 클러스터를 새로 만들었습니다.
-
-새 클러스터에서는 Helm의 `certgen` Job이 `dial tcp 10.96.0.1:443: i/o timeout`으로 계속 실패했습니다. API 서버 Service에 접속이 안 되는 상황이라 kube-system을 확인해 보니 kube-proxy가 `fsnotify watcher init: too many open files`로 CrashLoopBackOff 상태였습니다. 클러스터 두 개를 동시에 띄우면서 WSL2의 inotify 한도가 모자랐던 것으로 보입니다. kube-proxy가 없으니 Service 규칙이 없었고 coredns도 Ready가 아니었습니다.
-
-```bash
-sudo sysctl -w fs.inotify.max_user_instances=512
-sudo sysctl -w fs.inotify.max_user_watches=524288
-kubectl -n kube-system rollout restart ds/kube-proxy
-```
-
-한도를 올리고 kube-proxy를 재시작하니 바로 Running이 됐고, Pod에서 `https://10.96.0.1/version`이 응답했습니다. 그 뒤 v1.37.0을 지원 범위에 포함하는 Envoy Gateway v1.10.0으로 설치했습니다.
-
-## 하지 못한 것
-
-- 심화(Nginx v1·v2, 가중치 80:20 측정)는 하지 못했습니다.
-- Gateway `Programmed=False`는 kind에 LoadBalancer 구현이 없어서 생긴 것이고, MetalLB 같은 걸 붙여 해결하지는 않았습니다.
-
-# 재현용 YAML
-
-### kind.yaml (과제 1)
+## 워크플로 (과제 2 시점의 `.github/workflows/ci.yml`)
 
 ```yaml
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-networking:
-  kubeProxyMode: iptables
-nodes:
-  - role: control-plane
-  - role: worker
-  - role: worker
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "deploy/ci/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image name
+        id: meta
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=ghcr.io/${OWNER}/nginx-api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+
+  deploy:
+    needs: build
+    # 내 WSL에 등록한 개인 runner에서만 실행
+    runs-on: [self-hosted, linux]
+    env:
+      IMAGE: ${{ needs.build.outputs.image }}
+      KUBE_CONTEXT: kind-cicd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to kind
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "IMAGE=$IMAGE"
+          kubectl set image --local -f deploy/ci/deployment.yaml nginx="$IMAGE" -o yaml \
+            | kubectl --context "$KUBE_CONTEXT" -n cicd-ci apply -f -
+          kubectl --context "$KUBE_CONTEXT" -n cicd-ci apply -f deploy/ci/service.yaml
+          kubectl --context "$KUBE_CONTEXT" -n cicd-ci rollout status deployment/nginx-api --timeout=180s
+          kubectl --context "$KUBE_CONTEXT" -n cicd-ci get deployment nginx-api \
+            -o jsonpath='{.spec.template.spec.containers[0].image}'
+          echo
+          kubectl --context "$KUBE_CONTEXT" -n cicd-ci get pods -l app=nginx-api \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"  "}{.spec.containers[0].image}{"  "}{.status.containerStatuses[0].imageID}{"\n"}{end}'
 ```
 
-```bash
-kind create cluster --name netlab --config kind.yaml
-```
-
-### lab.yaml (과제 1)
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: client
-spec:
-  nodeSelector:
-    kubernetes.io/hostname: netlab-worker
-  containers:
-  - name: client
-    image: nicolaka/netshoot
-    command: ["sleep", "infinity"]
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: nginx-a
-  labels:
-    app: web
-spec:
-  nodeSelector:
-    kubernetes.io/hostname: netlab-worker
-  containers:
-  - name: nginx
-    image: nginx:latest
-    ports:
-    - containerPort: 80
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: nginx-b
-  labels:
-    app: web
-spec:
-  nodeSelector:
-    kubernetes.io/hostname: netlab-worker2
-  containers:
-  - name: nginx
-    image: nginx:latest
-    ports:
-    - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: web
-spec:
-  selector:
-    app: web
-  ports:
-  - port: 80
-    targetPort: 80
-```
-
-### nginx-gw.yaml (과제 3)
+## 배포 설정 (`deploy/ci/`)
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx
+  name: nginx-api
+  labels:
+    app: nginx-api
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: web
+      app: nginx-api
   template:
     metadata:
       labels:
-        app: web
+        app: nginx-api
     spec:
       containers:
       - name: nginx
-        image: nginx:latest
+        # 배포 job이 이번 실행의 SHA 태그로 바꿔서 적용함
+        image: ghcr.io/eraaster/nginx-api:placeholder
         ports:
-        - containerPort: 80
----
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+```
+
+```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: web
+  name: nginx-api
+  labels:
+    app: nginx-api
 spec:
+  type: ClusterIP
   selector:
-    app: web
+    app: nginx-api
   ports:
   - port: 80
-    targetPort: 80
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: nginx-route
-spec:
-  parentRefs:
-  - name: eg
-  hostnames:
-  - nginx.example.com
-  rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /app
-    filters:
-    - type: URLRewrite
-      urlRewrite:
-        path:
-          type: ReplacePrefixMatch
-          replacePrefixMatch: /
-    backendRefs:
-    - name: web
-      port: 80
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-    backendRefs:
-    - name: web
-      port: 80
+    targetPort: 8080
 ```
 
+## v1 → v2 변경 결과
+
+`app/nginx.conf`의 version만 v1에서 v2로 바꿔 push했고, 그 뒤로는 손대지 않았습니다.
+
+| 항목 | v1 | v2 |
+|---|---|---|
+| 소스 커밋 SHA | `773f5a640c27e42e6dd7e98b6810ad57964f16e5` | `e5c354f8d93d05a3f245ac991d3d6cf8e7ca1f12` |
+| Actions 실행 | [44482406996](https://github.com/eraaster/k8s-cicd-lab/actions/runs/44482406996) | [44483665249](https://github.com/eraaster/k8s-cicd-lab/actions/runs/44483665249) |
+| GHCR 태그 | `nginx-api:773f5a64...` | `nginx-api:e5c354f8...` |
+| Deployment 이미지 | `ghcr.io/eraaster/nginx-api:773f5a640c27...` | `ghcr.io/eraaster/nginx-api:e5c354f8d93d...` |
+| Pod | `nginx-api-75d8cb8b7c-7ff6q` | `nginx-api-69959cb99f-4xgnl` |
+| Pod imageID | `sha256:ca39012146e9...` | `sha256:4660c8d83c36...` |
+| rollout revision | 1 | 2 |
+| `/api/hello` | `{"message":"hello from nginx","version":"v1"}` | `{"message":"hello from nginx","version":"v2"}` |
+
+소스 커밋이 바뀌면서 태그가 바뀌었고, Deployment와 새 Pod가 새 태그를 썼습니다. Pod template이 바뀌어서 ReplicaSet 해시(`75d8cb8b7c` → `69959cb99f`)와 revision도 바뀌었고, 응답이 v2가 됐습니다.
+
+SHA 태그는 "이 이미지가 어느 커밋으로 만들어졌는지"를 알려 주지만, 태그는 다시 push하면 다른 이미지를 가리키게 바꿀 수 있습니다. 이미지 내용 자체를 고정하는 건 digest(`@sha256:...`)입니다. 위 표의 imageID가 그 digest입니다.
+
+## 겪은 문제
+
+- 첫 배포에서 Pod가 `ImagePullBackOff`였습니다. 이벤트에 `failed to fetch anonymous token ... 401 Unauthorized`가 찍혀서 GHCR 패키지가 Private이라는 걸 알았습니다.
+- Public으로 바꾼다고 저장소 visibility를 바꿨는데, 이미지 패키지는 그대로 Private이었습니다. 소스 저장소와 패키지 공개 범위가 별개라는 걸 여기서 확인했습니다. 저장소는 다시 Private으로 돌리고 패키지만 Public으로 바꾼 뒤 Pod를 지우고 실패한 job을 다시 돌려 해결했습니다.
+- 액션들이 Node.js 20 기반이라 경고가 떴지만 Node 24로 실행되어 동작에는 문제가 없었습니다.
+
+# 과제 3. Argo CD 연동과 GitOps
+
+## 설치와 저장소 연결
+
 ```bash
-kubectl apply -f nginx-gw.yaml
-kubectl exec deploy/nginx -- sh -c 'echo "hello from nginx" > /usr/share/nginx/html/index.html'
+kubectl create ns argocd
+kubectl apply -n argocd --server-side --force-conflicts \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
+
+비공개 저장소를 읽게 하려고 읽기 전용 deploy key를 만들어 등록했습니다. 개인 키는 Argo CD의 repository Secret에만 넣었습니다.
+
+```bash
+ssh-keygen -t ed25519 -N "" -C argocd -f ~/.ssh/argocd_k8s_cicd
+gh repo deploy-key add ~/.ssh/argocd_k8s_cicd.pub --repo eraaster/k8s-cicd-lab --title argocd   # 읽기 전용
+kubectl -n argocd create secret generic repo-k8s-cicd-lab \
+  --from-literal=type=git \
+  --from-literal=url=git@github.com:eraaster/k8s-cicd-lab.git \
+  --from-file=sshPrivateKey=$HOME/.ssh/argocd_k8s_cicd
+kubectl -n argocd label secret repo-k8s-cicd-lab argocd.argoproj.io/secret-type=repository
+```
+
+## Application
+
+처음에는 자동 동기화 없이 만들어 수동으로 Sync했고, 확인한 뒤 `automated`를 켰습니다. 최종 설정은 다음과 같습니다.
+
+```yaml
+# 첫 수동 Sync 확인 후 적용: 자동 동기화 켜기
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-api-gitops
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:eraaster/k8s-cicd-lab.git
+    targetRevision: main
+    path: deploy/gitops
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cicd-gitops
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+    - CreateNamespace=true
+```
+
+## 첫 Sync
+
+Application을 만들자 Git에는 있고 클러스터에는 없는 상태라 Missing / OutOfSync로 보였습니다. deploy key로 저장소를 읽는 데는 성공했다는 뜻입니다.
+
+![Sync 전](../../img/week3/이민영/argocd_outofsync.png)
+
+SYNC 후 Healthy / Synced가 됐습니다.
+
+![Sync 후](../../img/week3/이민영/argocd_synced.png)
+
+```
+deployment image: ghcr.io/eraaster/nginx-api:42ba7fb3bb44eebbce4ca0b6aaec3b9e63eec998
+pod: nginx-api-5588488bcf-djfbd   1/1   Running
+/api/hello: {"message":"hello from nginx","version":"v2"}
+```
+
+## 워크플로 수정 (GitOps용 `ci.yml`)
+
+배포 job을 빼고, 새 SHA 태그로 `deploy/gitops/deployment.yaml`의 image 줄을 바꿔 commit·push하는 `update-manifest` job을 넣었습니다. 이 job에만 `contents: write`를 줬습니다. 경로 필터를 `app/**`와 워크플로 파일로 줄여서, 봇이 만든 `deploy/gitops` commit이 다시 빌드를 일으키지 않게 했습니다. 클러스터 반영은 Argo CD가 맡습니다.
+
+```yaml
+name: ci
+
+# 과제 3: 이미지 빌드 후 클러스터에 직접 배포하지 않고
+# deploy/gitops 의 image 를 새 SHA 로 바꿔 commit 한다. 배포는 Argo CD 담당.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image name
+        id: meta
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=ghcr.io/${OWNER}/nginx-api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+
+  update-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      IMAGE: ${{ needs.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update image in deploy/gitops
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i -E "s#^(\s*image:\s*)ghcr\.io/[^[:space:]]+/nginx-api:[^[:space:]]+#\1${IMAGE}#" deploy/gitops/deployment.yaml
+          grep -n "image:" deploy/gitops/deployment.yaml
+          if git diff --quiet; then
+            echo "no change"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/gitops/deployment.yaml
+          git commit -m "deploy(gitops): nginx-api -> ${GITHUB_SHA}"
+          git pull --rebase origin main
+          git push origin HEAD:main
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-api
+  labels:
+    app: nginx-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-api
+  template:
+    metadata:
+      labels:
+        app: nginx-api
+    spec:
+      containers:
+      - name: nginx
+        # Actions가 새 SHA 태그로 이 줄을 바꿔서 commit함
+        image: ghcr.io/eraaster/nginx-api:<Actions가 갱신하는 SHA>
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+```
+
+## 소스 commit과 배포 설정 commit
+
+```
+38c9f86 deploy(gitops): nginx-api -> 4062cbb48d42719c50576014d2bda94e5fb999fd   ← 설정 commit B (봇)
+4062cbb feat: api v3                                                              ← 소스 commit A
+9610277 chore: enable argocd auto sync
+3e27498 deploy(gitops): nginx-api -> 42ba7fb3bb44eebbce4ca0b6aaec3b9e63eec998
+42ba7fb feat: gitops with argo cd
+```
+
+| 단계 | 첫 GitOps 배포 | v3 배포 |
+|---|---|---|
+| 소스 commit A | `42ba7fb` feat: gitops with argo cd | `4062cbb` feat: api v3 |
+| 이미지 태그 | `nginx-api:42ba7fb3bb44...` | `nginx-api:4062cbb48d42...` |
+| 설정 commit B (봇) | `3e27498` deploy(gitops): nginx-api -> 42ba7fb... | `38c9f86` deploy(gitops): nginx-api -> 4062cbb... |
+| Actions 실행 | [44484701700](https://github.com/eraaster/k8s-cicd-lab/actions/runs/44484701700) | [44485210239](https://github.com/eraaster/k8s-cicd-lab/actions/runs/44485210239) |
+| Argo CD | 수동 Sync → Synced / Healthy | 자동 동기화 → Synced / Healthy |
+| Pod | `nginx-api-5588488bcf-djfbd` | `nginx-api-75bd67b85-q44rv` |
+| `/api/hello` | v2 | v3 |
+
+v3는 `app/nginx.conf`만 바꿔 push한 뒤 아무것도 하지 않았고, Actions 빌드 → 봇 commit → Argo CD 자동 동기화 → 새 Pod 순서로 반영되어 응답이 v3로 바뀌었습니다.
+
+이미지 태그는 소스 commit A의 SHA이고, Argo CD가 읽은 건 그 태그를 적어 넣은 설정 commit B입니다. 두 SHA는 다릅니다. 이미지만 GHCR에 올리고 Git의 image 줄을 바꾸지 않으면 Argo CD는 바뀐 게 없다고 보고 아무것도 하지 않습니다.
+
+## GitOps 질문
+
+**선언적 상태.** Git에는 `kubectl apply` 같은 명령이 아니라 "nginx-api는 이 이미지(`:SHA`)로 1개 떠 있고, Service는 80을 8080으로 보낸다"는 결과 상태를 저장합니다. 이미지, replicas, Service 포트가 모두 `deploy/gitops/`의 YAML 값입니다.
+
+**버전과 변경 이력.** 배포 상태가 바뀔 때마다 commit이 남습니다. 이번 실습에서는 소스 변경은 제 commit, 이미지 반영은 `github-actions[bot]`의 commit으로 구분됩니다. 브랜치 보호를 켜면 봇 commit도 PR과 리뷰를 거치게 해서 어떤 배포가 승인됐는지 PR 기록으로 남길 수 있습니다.
+
+**Pull 방식.** 과제 2는 Actions(내 runner)가 kubeconfig로 클러스터에 직접 명령을 보내는 push 방식이라, CI가 클러스터 자격 증명을 가져야 합니다. 과제 3은 클러스터 안의 Argo CD가 Git을 읽어 와서 적용하는 pull 방식입니다. Actions는 Git에 쓰기만 하고 클러스터 접근 권한이 없습니다. Argo CD는 읽기 전용 deploy key만 가집니다.
+
+**상태 조정(reconciliation).** 원하는 상태는 Git의 YAML이고, 실제 상태는 클러스터에 떠 있는 리소스입니다. Argo CD는 주기적으로(기본 약 3분) Git을 다시 읽고 클러스터와 비교해, 다르면 OutOfSync로 표시합니다. 자동 동기화가 켜져 있으면 Git 쪽에 맞춰 적용합니다.
+
+**드리프트.** `kubectl scale --replicas=3`처럼 클러스터를 직접 바꾸면 Git(1)과 실제(3)가 달라져 OutOfSync가 됩니다. 자동 동기화는 Git이 바뀌었을 때 따라가는 기능이라, 클러스터만 바뀐 경우에는 selfHeal이 켜져 있어야 Git 값으로 되돌립니다. 이번 설정은 `selfHeal: false`라서 차이만 표시됩니다. (직접 실습하지는 않았습니다.)
+
+**삭제와 복구.** prune을 켜면 Git에서 지운 리소스를 클러스터에서도 지웁니다. 끄면(이번 설정) OutOfSync로 남기만 합니다. 문제가 생기면 이미지 줄을 이전 SHA로 되돌리는 commit(revert)을 만들면 Argo CD가 그 상태로 다시 맞추고, 이전 이미지로 Pod가 바뀝니다.
+
+**CI와 CD의 책임.** CI(Actions)는 코드로 이미지를 만들어 GHCR에 올리고, Git의 image 참조를 바꾸는 데까지 맡습니다. CD(Argo CD)는 Git의 선언을 클러스터에 반영합니다. 이미지 push만으로는 Argo CD가 새 이미지를 알 수 없고, Git의 image 줄이 바뀌어야 배포됩니다.
+
+## 전체 흐름
+
+```
+[과제 2: push 방식]
+개발자 push ─► Actions build ─► GHCR (:SHA)
+                    └─► self-hosted runner ─kubectl─► kind (cicd-ci) ─pull─► GHCR
+
+[과제 3: GitOps]
+개발자 push (commit A) ─► Actions build ─► GHCR (:A)
+                              └─► update-manifest ─► Git commit B (image: :A)
+kind 안의 Argo CD ─(deploy key로 읽기)─► Git main / deploy/gitops
+        └─► cicd-gitops 에 적용 ─► kind 노드가 GHCR에서 :A pull ─► Pod
+```
+
+# 해결하지 못한 것
+
+- 딥다이브는 하지 못했습니다.
+- selfHeal과 prune은 설명만 하고 실습하지 않았습니다.
+- 액션 버전이 Node.js 20 기반이라 경고가 남아 있습니다.
