@@ -1,6 +1,0 @@
-apiVersion: v2
-name: nginx
-description: Nginx comparison lab
-type: application
-version: 0.1.0
-appVersion: alpine

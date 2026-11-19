@@ -1,5 +1,0 @@
-$ helm lint lab/deploy/helm/nginx
-==> Linting lab/deploy/helm/nginx
-[INFO] Chart.yaml: icon is recommended
-
-1 chart(s) linted, 0 chart(s) failed

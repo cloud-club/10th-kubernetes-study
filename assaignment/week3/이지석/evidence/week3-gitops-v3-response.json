@@ -1,7 +1,0 @@
-{
-  "status": 200,
-  "responses": {
-    "{\"message\":\"hello from nginx\",\"version\":\"v3\"}": 1
-  },
-  "count": 1
-}

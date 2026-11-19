@@ -1,11 +1,12 @@
 # 3주차 과제: Kubernetes CI/CD — 이지석
 
+> **작성 중인 초안입니다.** 공개 GHCR 이미지로 직접 CI와 GitOps 배포를 재검증한 뒤 제출 상태로 전환합니다.
+
 - GitHub: **dev-jiseok**
 - 개인 실습 저장소: [dev-jiseok/kubernetes-study-lab](https://github.com/dev-jiseok/kubernetes-study-lab) (비공개)
 - 이미지: `ghcr.io/dev-jiseok/nginx-api:<전체 소스 commit SHA>`
 - 기준 과제: [Issue #14](https://github.com/cloud-club/10th-kubernetes-study/issues/14)
 - 실습일: 2026-11-19, macOS ARM64
-- [재현 명령과 발표 시연](./이지석/RUNBOOK.md) / [발표 HTML](./이지석/presentation/week3.html) / [발표 대본·예상 질문](./이지석/presentation/발표대본.md)
 
 ## 수행 범위와 남은 조건
 
@@ -56,14 +57,11 @@ kubectl -n cicd-plain port-forward svc/nginx 18080:80
 curl http://localhost:18080/
 ```
 
-이미지 아래의 기록은 **실제로 수집한 명령 출력/JSON/HTTP 응답을 PNG로 렌더링한 증거**입니다. Argo CD 웹 화면 또는 터미널 앱을 직접 찍은 스크린샷으로 표현하지 않았습니다. 원본 로그를 함께 첨부했습니다.
-
-![세 배포 방식의 리소스와 실제 응답](../../img/week3/이지석/deployment-tools.png)
+아래 결과는 실제 수집한 리소스와 HTTP 응답입니다. Argo CD 이미지 두 장은 수집한 JSON/응답을 렌더링한 기록이며 웹 UI 화면 캡처는 아닙니다.
 
 - dev replicas=1, prod replicas=2. prod overlay를 실제 적용해 2개 Pod Ready까지 확인한 뒤 dev로 복구했습니다.
 - Helm values의 `replicaCount`, `image.repository`, `image.tag`가 렌더링에 반영됩니다.
-- [렌더링 동등성 검사 결과](./이지석/evidence/week3-manifest-validation.txt)는 기본 세 방식의 Deployment·Service **spec이 동일함**을 확인합니다.
-- [dev 렌더링](./이지석/evidence/week3-render-kustomize-dev.yaml.txt), [prod 렌더링](./이지석/evidence/week3-render-kustomize-prod.yaml.txt), [Helm 렌더링](./이지석/evidence/week3-render-helm.yaml.txt), [prod 실제 상태](./이지석/evidence/week3-kustomize-prod.txt)
+- 렌더링 결과를 비교해 기본 세 방식의 Deployment·Service spec이 동일함을 확인했습니다.
 
 ### 비교
 
@@ -101,11 +99,7 @@ v2는 `app/nginx.conf`의 응답 버전을 바꾼 source push로 진행했습니
 - **v1**: 소스 `2fd1d557a21844cdbe3a3be3c7cea23c0fa6aed6` / [Actions build·deploy 성공](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44497197652)
 - **v2**: 소스 `ef7956987576fd5e2cc6ede09671492710cdbdfc` / [Actions build·deploy 성공](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44497510776)
 
-![v1 이미지와 응답 기록](../../img/week3/이지석/ci-v1.png)
-
-![v2 이미지와 응답 기록](../../img/week3/이지석/ci-v2.png)
-
-전체 이미지 참조와 Pod imageID는 아래 표에서 별도로 확인할 수 있습니다. SHA 태그는 소스 추적에 유용하지만 덮어쓸 수 있습니다. 내용 자체를 고정하려면 digest 참조를 사용합니다. [실제 GHCR index·플랫폼별 manifest 기록](./이지석/evidence/week3-ghcr-manifests.txt)도 첨부했습니다. 멀티 플랫폼 이미지의 상위 index digest와 ARM64 개별 manifest digest는 서로 다른 객체를 가리킬 수 있어 imageID와 무조건 같다고 단정하면 안 됩니다.
+전체 이미지 참조와 Pod imageID는 아래 표에서 별도로 확인할 수 있습니다. SHA 태그는 소스 추적에 유용하지만 덮어쓸 수 있습니다. 내용 자체를 고정하려면 digest 참조를 사용합니다. 멀티 플랫폼 이미지의 상위 index digest와 ARM64 개별 manifest digest는 서로 다른 객체를 가리킬 수 있어 imageID와 무조건 같다고 단정하면 안 됩니다.
 
 ## 과제 3. Argo CD와 GitOps
 
@@ -136,7 +130,7 @@ flowchart LR
 - Argo CD: `Synced / Healthy`
 - 실제 `/api/hello`: `{"message":"hello from nginx","version":"v3"}`
 
-v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 [자동 동기화 타임라인](./이지석/evidence/week3-gitops-auto-timeline.json)을 수집했습니다. Argo CD의 revision은 설정 commit B이고, Pod 이미지 태그는 소스 commit A입니다.
+v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 자동 동기화 타임라인을 수집했습니다. Argo CD의 revision은 설정 commit B이고, Pod 이미지 태그는 소스 commit A입니다.
 
 ![Argo CD v3 자동 배포 기록](../../img/week3/이지석/argocd-v3.png)
 
@@ -152,7 +146,7 @@ v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 [자동 동기화 
 
 ### Synced와 Healthy는 별개
 
-초기 인증 준비 순서 때문에 첫 GitOps Pod가 `ImagePullBackOff`가 됐을 때도 Application은 **Synced / Progressing**이었습니다. Git 선언을 적용했다는 것과 프로세스가 정상적으로 실행된다는 것은 다릅니다. [실제 실패 Events](./이지석/evidence/week3-gitops-initial-pull-failure.txt)를 저장한 뒤 ServiceAccount의 이미지 인증 설정을 갖춘 새 Pod로 복구했습니다. 이 초기 복구는 수동으로 했으며, 이후 v3 검증은 자동 배포였습니다.
+초기 인증 준비 순서 때문에 첫 GitOps Pod가 `ImagePullBackOff`가 됐을 때도 Application은 **Synced / Progressing**이었습니다. Git 선언을 적용했다는 것과 프로세스가 정상적으로 실행된다는 것은 다릅니다. 실제 실패 Events를 저장한 뒤 ServiceAccount의 이미지 인증 설정을 갖춘 새 Pod로 복구했습니다. 이 초기 복구는 수동으로 했으며, 이후 v3 검증은 자동 배포였습니다.
 
 ## 선택 심화: Deployment controller가 보는 변경
 
@@ -163,15 +157,18 @@ v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 [자동 동기화 
 | 이유 | spec.replicas 변경 | spec.template 변경 |
 | 복구 | 원본 plain YAML 재적용, replicas=1 | 원본 image=nginx:alpine으로 복구 |
 
-[변경 전](./이지석/evidence/week3-plain-before-scale.txt), [scale 후](./이지석/evidence/week3-plain-after-scale.txt), [image 변경 후](./이지석/evidence/week3-plain-after-image.txt), [rollout history](./이지석/evidence/week3-plain-history.txt)를 함께 남겼습니다. 배포 도구는 원하는 리소스를 만들고, 실제 ReplicaSet과 Pod의 조정은 Kubernetes controller가 수행합니다.
-
-![ReplicaSet 변화 기록](../../img/week3/이지석/replicas-vs-image.png)
+배포 도구는 원하는 리소스를 만들고, 실제 ReplicaSet과 Pod의 조정은 Kubernetes controller가 수행합니다.
 
 ### selfHeal 추가 관찰
 
-[시간별 원본 기록](./이지석/evidence/week3-selfheal.json)을 함께 제출합니다. 자동 동기화는 유지하고 selfHeal만 끈 상태와 켠 상태를 비교했습니다.
+자동 동기화는 유지하고 selfHeal만 끈 상태와 켠 상태를 비교했습니다. Git revision은 동일하게 유지했습니다.
 
-![selfHeal 비교 기록](../../img/week3/이지석/selfheal.png)
+| 관찰 시각(UTC) | selfHeal | 실제 replicas | Sync / Health |
+|---|---|---|---|
+| 09:44:28 | false | 3 | OutOfSync / Healthy |
+| 09:44:31 | true | 1 | Synced / Healthy |
+| 09:44:33, 다시 3으로 변경 | true | 3 | OutOfSync / Healthy |
+| 09:44:36 | true | 1 | Synced / Healthy |
 
 ## 문제와 해결·미해결 사항
 
@@ -246,19 +243,9 @@ HTTP 200: {"message":"hello from nginx","version":"v3"}
 
 </details>
 
-## 재현용 파일과 워크플로
+## 워크플로와 배포 설정
 
-공개 보고서만으로 구성을 읽을 수 있도록 자격 증명을 제외한 파일을 함께 첨부했습니다.
-
-- [deploy/plain/](./이지석/deploy/plain/)
-- [deploy/kustomize/](./이지석/deploy/kustomize/)
-- [deploy/helm/](./이지석/deploy/helm/)
-- [app/](./이지석/app/)
-- [infra/](./이지석/infra/)
-- [scripts/](./이지석/scripts/)
-- [재현 가이드](./이지석/RUNBOOK.md)
-- [원본 실측 로그](./이지석/evidence/)
-- [Public 전환 후 Direct CI 예시](./이지석/examples/ci-direct-public.yml)
+비공개 실습 저장소의 핵심 설정을 이 문서에 첨부했습니다. 자격 증명은 제외했습니다. 발표 자료와 전체 로그는 제출 PR에서 분리해 보관합니다.
 
 <details>
 <summary>과제 2: 실제 사용한 직접 배포 워크플로</summary>
@@ -513,56 +500,88 @@ spec:
 </details>
 
 <details>
-<summary>한시적 Private GHCR 인증 보조 워크플로</summary>
+<summary>과제 1: 일반 YAML·Kustomize·Helm 설정</summary>
+
+일반 YAML은 아래 두 리소스이며 Kustomize base에서도 같은 파일을 참조합니다.
 
 ```yaml
-name: Temporary private registry verification session
-on:
-  workflow_dispatch:
-permissions:
-  contents: read
-  packages: read
-jobs:
-  registry-session:
-    runs-on: [self-hosted, macOS, ARM64, jiseok-k8s]
-    timeout-minutes: 45
-    env:
-      KUBE_CONTEXT: kind-jiseok-netlab
-      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Allow GitOps pull during this verification job
-        shell: bash
-        run: |
-          set -euo pipefail
-          kubectl --context "$KUBE_CONTEXT" create namespace cicd-gitops --dry-run=client -o yaml | kubectl --context "$KUBE_CONTEXT" apply -f -
-          kubectl --context "$KUBE_CONTEXT" -n cicd-gitops delete configmap verification-complete --ignore-not-found
-          kubectl --context "$KUBE_CONTEXT" -n cicd-gitops create secret docker-registry ghcr-lab-pull \
-            --docker-server=ghcr.io --docker-username="$GITHUB_ACTOR" --docker-password="$GHCR_TOKEN" \
-            --dry-run=client -o json | kubectl --context "$KUBE_CONTEXT" -n cicd-gitops apply --server-side -f -
-          kubectl --context "$KUBE_CONTEXT" -n cicd-gitops patch serviceaccount default \
-            -p '{"imagePullSecrets":[{"name":"ghcr-lab-pull"}]}'
-          export DOCKER_CONFIG="$RUNNER_TEMP/ghcr-lab-docker"
-          mkdir -p "$DOCKER_CONFIG/cli-plugins"
-          ln -sf /Applications/Docker.app/Contents/Resources/cli-plugins/docker-buildx "$DOCKER_CONFIG/cli-plugins/docker-buildx"
-          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          for sha in 2fd1d557a21844cdbe3a3be3c7cea23c0fa6aed6 ef7956987576fd5e2cc6ede09671492710cdbdfc; do
-            docker buildx imagetools inspect "ghcr.io/dev-jiseok/nginx-api:$sha"
-          done
-          LAST_IMAGE=''
-          echo 'Temporary private pull credentials active only during this job. Public GHCR remains required.'
-          for _ in {1..80}; do
-            IMAGE=$(kubectl --context "$KUBE_CONTEXT" -n cicd-gitops get deployment nginx-api -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
-            if [[ -n "$IMAGE" && "$IMAGE" != "$LAST_IMAGE" ]]; then
-              docker buildx imagetools inspect "$IMAGE" || true
-              LAST_IMAGE="$IMAGE"
-            fi
-            if kubectl --context "$KUBE_CONTEXT" -n cicd-gitops get configmap verification-complete >/dev/null 2>&1; then
-              exit 0
-            fi
-            sleep 30
-          done
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  type: ClusterIP
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
 ```
+
+```yaml
+# deploy/kustomize/base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+
+# deploy/kustomize/overlays/dev/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+replicas:
+  - name: nginx
+    count: 1
+
+# deploy/kustomize/overlays/prod/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+replicas:
+  - name: nginx
+    count: 2
+
+```
+
+Helm `values.yaml`:
+
+```yaml
+replicaCount: 1
+image:
+  repository: nginx
+  tag: alpine
+```
+
+Helm Deployment는 일반 YAML의 replicas를 `{{ .Values.replicaCount }}`, image를 `"{{ .Values.image.repository }}:{{ .Values.image.tag }}"`로 렌더링합니다. Service의 spec은 일반 YAML과 같습니다.
 
 </details>
 

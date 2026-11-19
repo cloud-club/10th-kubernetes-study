@@ -1,4 +1,0 @@
-plain Deployment/Service specs match, namespace is injected at deploy time
-kustomize-dev Deployment/Service specs match, namespace is injected at deploy time
-helm Deployment/Service specs match, namespace is injected at deploy time
-PASS: dev=1, prod=2, Helm replica/image overrides work

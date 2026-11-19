@@ -1,9 +1,0 @@
-$ helm upgrade --install nginx lab/deploy/helm/nginx -n cicd-helm
-Release "nginx" does not exist. Installing it now.
-NAME: nginx
-LAST DEPLOYED: Thu Nov 19 18:27:44 2026
-NAMESPACE: cicd-helm
-STATUS: deployed
-REVISION: 1
-DESCRIPTION: Install complete
-TEST SUITE: None
