@@ -1,6 +1,6 @@
 # 3주차 과제: Kubernetes CI/CD — 이지석
 
-> **작성 중인 초안입니다.** 공개 GHCR 이미지로 직접 CI와 GitOps 배포를 재검증한 뒤 제출 상태로 전환합니다.
+> 3주차 기본 과제 1~3을 수행했습니다. 공개 GHCR에서 인증 Secret 없이 새 SHA 이미지를 받아 v1·v2 직접 CI와 v3 자동 GitOps 배포 및 실제 응답까지 확인했습니다.
 
 - GitHub: **dev-jiseok**
 - 개인 실습 저장소: [dev-jiseok/kubernetes-study-lab](https://github.com/dev-jiseok/kubernetes-study-lab) (비공개)
@@ -8,20 +8,18 @@
 - 기준 과제: [Issue #14](https://github.com/cloud-club/10th-kubernetes-study/issues/14)
 - 실습일: 2026-11-19, macOS ARM64
 
-## 수행 범위와 남은 조건
+## 수행 결과
 
 | 항목 | 확인 결과 |
 |---|---|
-| 일반 YAML·Kustomize·Helm | 세 namespace에서 Nginx 기본 페이지 HTTP 200, 렌더링 설정 동등성 검증 |
-| Actions 직접 배포 | v1과 v2에서 build/deploy job 성공, 전체 SHA·Pod image/imageID·실제 응답 수집 |
-| Argo CD GitOps | 비공개 Git 읽기 전용 인증, 첫 Sync, v3 자동 Git 갱신·배포·응답 검증 |
-| **Public GHCR** | **미완료. 패키지는 Private이며 익명 pull은 401. 아래 성공 결과는 임시 인증을 사용한 조건부 검증** |
-| 선택 심화 1 | replicas 변경과 Pod template 이미지 변경의 ReplicaSet 차이 관찰 및 초기 설정 복구 |
-| 추가 관찰 | selfHeal 꺼짐/켜짐에 따른 수동 replicas 변경의 복원 여부 |
+| 일반 YAML·Kustomize·Helm | 세 namespace의 Nginx 기본 페이지 HTTP 200, 기본 spec 동등성, dev=1/prod=2 및 Helm values 변경 확인 |
+| GitHub Actions 직접 배포 | 공개 GHCR의 새 전체 SHA 이미지로 v1 → v2 자동 배포, build/deploy 성공, 새 Pod와 실제 응답 확인 |
+| Argo CD GitOps | 비공개 Git 읽기 전용 인증, 첫 v2 Sync, v3 이미지 게시·Git 갱신·자동 동기화·응답 확인 |
+| Public GHCR | 개인 자격 증명 없는 manifest 요청 HTTP 200, linux/amd64·linux/arm64 포함, Pod imagePullSecrets 없음 |
+| 선택 심화 1 | replicas 변경과 Pod template 변경의 ReplicaSet 차이 관찰 후 원복 |
+| 추가 관찰 | selfHeal 꺼짐/켜짐에 따른 live replicas 복원 비교 |
 
-**임시 인증의 범위:** 과제 2는 deploy job의 `packages: read` GITHUB_TOKEN으로 imagePullSecret을 만들었습니다. GitOps는 별도 `registry-session.yml` job이 검증 시간 동안만 동일한 읽기 권한을 제공했습니다. 최종 `ci.yml`의 build/update-manifest job은 클러스터에 접근하지 않습니다. 인증 보조 job은 앱의 image나 replicas를 배포하지 않습니다.
-
-GITHUB_TOKEN은 job 종료 시 만료되므로 이 방식은 지속 가능한 이미지 pull 구성이 아닙니다. 성공한 시점의 실측과, Public 전환 전에는 새 노드/새 이미지 배포를 계속할 수 없다는 한계를 구분합니다. 공개 전환 후 익명 pull과 새 버전 자동 배포를 다시 확인해야 과제의 모든 조건을 충족합니다. [토큰 수명 공식 문서](https://docs.github.com/en/actions/concepts/security/github_token)
+소스 저장소는 **Private**, GHCR 이미지 패키지는 **Public**입니다. 공개 전환 후 v1·v2·v3를 새 소스 SHA로 다시 빌드해 검증했습니다. `cicd-ci`와 `cicd-gitops`의 default ServiceAccount에 imagePullSecrets가 없고, 두 namespace에 Docker registry Secret도 없는 상태에서 수행했습니다. 아래 값은 이 최종 검증 결과입니다.
 
 ## 실습 환경
 
@@ -63,6 +61,13 @@ curl http://localhost:18080/
 - Helm values의 `replicaCount`, `image.repository`, `image.tag`가 렌더링에 반영됩니다.
 - 렌더링 결과를 비교해 기본 세 방식의 Deployment·Service spec이 동일함을 확인했습니다.
 
+
+| namespace | HTTP | 응답 페이지 |
+|---|---|---|
+| `cicd-plain` | 200 | Welcome to nginx! |
+| `cicd-kustomize` | 200 | Welcome to nginx! |
+| `cicd-helm` | 200 | Welcome to nginx! |
+
 ### 비교
 
 | 항목 | 일반 YAML | Kustomize | Helm |
@@ -94,10 +99,10 @@ GitHub-hosted runner에서 로컬 kind API로 바로 접근할 수 없어 build/
 
 ### v1과 v2 실측
 
-v2는 `app/nginx.conf`의 응답 버전을 바꾼 source push로 진행했습니다. CI 배포 리소스를 수동으로 수정하거나 수동 배포 명령을 실행하지 않았습니다. 같은 commit에는 GitOps 인증 준비용 별도 워크플로도 추가했지만, 앱의 동작 변경은 version 값뿐입니다.
+v2는 `app/nginx.conf`의 응답 버전을 바꾼 source push로 진행했습니다. CI 배포 리소스를 수동으로 수정하거나 수동 배포 명령을 실행하지 않았습니다. 앱의 동작 변경은 version 값뿐입니다.
 
-- **v1**: 소스 `2fd1d557a21844cdbe3a3be3c7cea23c0fa6aed6` / [Actions build·deploy 성공](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44497197652)
-- **v2**: 소스 `ef7956987576fd5e2cc6ede09671492710cdbdfc` / [Actions build·deploy 성공](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44497510776)
+- **v1**: 소스 `e0ec1aa1422384646872a3888622d20f16535be8` / [Actions build·deploy 성공](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44512969147)
+- **v2**: 소스 `5720d8bf031ab767cc7c38024209ea122debbd3a` / [Actions build·deploy 성공](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44513140814)
 
 전체 이미지 참조와 Pod imageID는 아래 표에서 별도로 확인할 수 있습니다. SHA 태그는 소스 추적에 유용하지만 덮어쓸 수 있습니다. 내용 자체를 고정하려면 digest 참조를 사용합니다. 멀티 플랫폼 이미지의 상위 index digest와 ARM64 개별 manifest digest는 서로 다른 객체를 가리킬 수 있어 imageID와 무조건 같다고 단정하면 안 됩니다.
 
@@ -105,7 +110,7 @@ v2는 `app/nginx.conf`의 응답 버전을 바꾼 source push로 진행했습니
 
 Argo CD v3.6.2를 설치하고, 개인 비공개 Git 저장소에 한정된 **읽기 전용 deploy key**를 등록했습니다. 개인키는 저장소 밖에서 관리하고 Argo CD repository Secret으로만 전달했습니다. Git 읽기 인증과 GHCR 이미지 pull 인증은 별개입니다.
 
-Application은 `main`의 `deploy/gitops`를 읽고 `cicd-gitops`에 적용합니다. 처음부터 자동 Sync를 켰으며, 첫 배포에서 v2 응답과 Synced/Healthy를 확인한 뒤 CI를 GitOps 방식으로 전환했습니다.
+Application은 `main`의 `deploy/gitops`를 읽고 `cicd-gitops`에 적용합니다. 공개 이미지 재검증의 첫 단계에서 v2 응답과 Synced/Healthy를 확인한 뒤 CI를 GitOps 방식으로 전환했습니다. 아래 첫 동기화 기록은 공개 이미지 기준으로 다시 진행한 결과입니다.
 
 ![Argo CD 첫 동기화 기록](../../img/week3/이지석/argocd-initial.png)
 
@@ -124,9 +129,9 @@ flowchart LR
 
 ### v3 자동 배포
 
-- 소스 commit A: `931143126b7ebce575a0d39b55e2e1dcb29a8c2b`
-- 설정 commit B: `c968b72881948efd8234790bcb9b01e42d71d6d2`
-- [Actions build/update-manifest](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44498153954)
+- 소스 commit A: `5a3f260e5b7945c7290bfef48d7f4ad40f657d9b`
+- 설정 commit B: `17d19c122ea737e454aba043119dfce329fbfee9`
+- [Actions build/update-manifest](https://github.com/dev-jiseok/kubernetes-study-lab/actions/runs/44513783761)
 - Argo CD: `Synced / Healthy`
 - 실제 `/api/hello`: `{"message":"hello from nginx","version":"v3"}`
 
@@ -138,7 +143,7 @@ v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 자동 동기화 �
 
 1. **선언적 상태:** Git에 이미지 주소, replicas=1, Service 80/8080 같은 원하는 결과 상태를 저장합니다. controller가 실제 리소스를 그 값에 맞춥니다.
 2. **버전과 변경 이력:** 소스 commit과 봇의 manifest commit을 연결해 어느 이미지가 배포됐는지 추적합니다. 이번 개인 실습은 main 직접 갱신이며 리뷰 승인 절차는 구성하지 않았습니다. 운영 환경에서 보호 브랜치·PR 리뷰를 추가하면 승인 이력을 남길 수 있습니다.
-3. **Pull 방식:** Direct CI에서는 runner가 클러스터로 apply합니다. GitOps에서는 클러스터의 Argo CD가 Git을 읽습니다. 최종 build/update-manifest job에는 kubeconfig가 필요하지 않습니다. 다만 이번 임시 이미지 인증 보조 job에는 별도로 클러스터 접근이 있습니다.
+3. **Pull 방식:** Direct CI에서는 runner가 클러스터로 apply합니다. GitOps에서는 클러스터의 Argo CD가 Git을 읽습니다. 최종 build/update-manifest job에는 kubeconfig가 필요하지 않습니다. 공개 이미지이므로 별도의 이미지 인증 보조 job도 실행하지 않았습니다.
 4. **상태 조정:** desired state는 Git, live state는 Kubernetes API에서 관찰한 리소스입니다. 차이를 비교해 OutOfSync를 표시하고 허용된 자동 동기화 정책으로 맞춥니다. polling이 있으므로 commit 직후 화면이 즉시 바뀌지 않을 수 있습니다.
 5. **드리프트:** Git replicas=1에서 `kubectl scale`로 live replicas=3을 만들면 차이가 생깁니다. 자동 Sync는 새 Git 변경을 반영하고, selfHeal은 같은 Git revision 상태에서 발생한 live 변경도 복구하도록 합니다. 아래 실제 비교 실험에서는 Git commit을 추가하지 않았습니다.
 6. **삭제와 복구:** prune은 Git에서 제거된 관리 대상 리소스를 클러스터에서도 삭제합니다. 잘못된 이미지 변경은 이전 참조로 Git을 revert하고 동기화해 복구합니다. 클러스터만 직접 되돌리면 다음 조정에서 Git 값으로 다시 바뀔 수 있습니다. prune 삭제 실험은 수행하지 않았습니다.
@@ -146,9 +151,23 @@ v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 자동 동기화 �
 
 ### Synced와 Healthy는 별개
 
-초기 인증 준비 순서 때문에 첫 GitOps Pod가 `ImagePullBackOff`가 됐을 때도 Application은 **Synced / Progressing**이었습니다. Git 선언을 적용했다는 것과 프로세스가 정상적으로 실행된다는 것은 다릅니다. 실제 실패 Events를 저장한 뒤 ServiceAccount의 이미지 인증 설정을 갖춘 새 Pod로 복구했습니다. 이 초기 복구는 수동으로 했으며, 이후 v3 검증은 자동 배포였습니다.
+초기 인증 준비 순서 때문에 첫 GitOps Pod가 `ImagePullBackOff`가 됐을 때도 Application은 **Synced / Progressing**이었습니다. Git 선언을 적용했다는 것과 프로세스가 정상적으로 실행된다는 것은 다릅니다. 이 실패는 공개 전환 전 준비 과정에서 발생했습니다. 이후 GHCR을 Public으로 바꾸고 임시 인증을 제거한 뒤 새 v1·v2·v3 이미지를 검증했습니다. 본문에 제출한 최종 v3 결과는 수동 Sync 없이 자동 배포된 결과입니다.
 
 ## 선택 심화: Deployment controller가 보는 변경
+
+예상: replicas만 바꾸면 기존 ReplicaSet의 Pod 수가 달라지고, Pod template의 image를 바꾸면 새 ReplicaSet이 생길 것으로 예상했습니다. 아래 명령으로 변경 전후를 관찰했고, 결과가 예상과 일치했습니다.
+
+```bash
+kubectl -n cicd-plain get deployment,rs,pods -o wide
+kubectl -n cicd-plain scale deployment/nginx --replicas=2
+kubectl -n cicd-plain get deployment,rs,pods -o wide
+kubectl -n cicd-plain set image deployment/nginx nginx=nginx:1.27-alpine
+kubectl -n cicd-plain rollout status deployment/nginx
+kubectl -n cicd-plain get deployment,rs,pods -o wide
+kubectl -n cicd-plain describe deployment nginx
+kubectl -n cicd-plain rollout history deployment/nginx
+kubectl -n cicd-plain apply -f deploy/plain/
+```
 
 | 관찰 | replicas=1에서 2 | image=nginx:alpine에서 nginx:1.27-alpine |
 |---|---|---|
@@ -161,7 +180,7 @@ v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 자동 동기화 �
 
 ### selfHeal 추가 관찰
 
-자동 동기화는 유지하고 selfHeal만 끈 상태와 켠 상태를 비교했습니다. Git revision은 동일하게 유지했습니다.
+공개 이미지 재검증 이전에 수행한 별도 실험입니다. 자동 동기화는 유지하고 selfHeal만 끈 상태와 켠 상태를 비교했습니다. 이 실험 동안 Git revision은 동일하게 유지했습니다.
 
 | 관찰 시각(UTC) | selfHeal | 실제 replicas | Sync / Health |
 |---|---|---|---|
@@ -170,75 +189,98 @@ v3 push 이후 수동 Sync나 kubectl 이미지 변경 없이 자동 동기화 �
 | 09:44:33, 다시 3으로 변경 | true | 3 | OutOfSync / Healthy |
 | 09:44:36 | true | 1 | Synced / Healthy |
 
-## 문제와 해결·미해결 사항
+## 문제와 해결
 
-| 상황 | 원인과 처리 |
+| 상황 | 원인과 해결 |
 |---|---|
-| 최초 Direct CI 배포 실패 | `cicd-ci` namespace를 배포보다 늦게 생성. 사전 namespace 준비 후 후속 v1/v2 실행 성공 |
-| GHCR 익명 pull 401 | 패키지가 Private. 임시 job 토큰으로 실측했지만 **Public 전환은 미완료** |
-| GitOps 첫 Pod의 ImagePullBackOff | ServiceAccount 이미지 인증 등록 전에 만들어진 Pod가 익명 pull. 인증 등록 후 해당 Pod만 재생성 |
-| 별도 Docker 설정에서 buildx 미발견 | 격리한 DOCKER_CONFIG에 Desktop cli-plugin 링크를 지정해 복구 |
-| GitOps polling 대기 | CI 성공과 즉시 동기화는 같은 시점이 아님. 수동 Sync 없이 타임라인으로 관찰 |
-| 자격 증명 | 토큰·개인키·kubeconfig를 제출하지 않음. 임시 검증 종료 시 이미지 인증 Secret/참조를 정리 |
+| 최초 Direct CI namespace 오류 | namespace를 배포보다 늦게 생성. 사전 생성 후 v1/v2 실행 성공 |
+| GHCR 익명 pull 401 | 패키지가 Private. Public 변경 후 익명 manifest HTTP 200과 인증 Secret 없는 새 Pod 배포까지 재검증 |
+| 초기 GitOps ImagePullBackOff | Git 인증과 이미지 pull 권한은 별개. Public 전환 후 두 namespace의 임시 registry Secret/참조를 제거하고 다시 검증 |
+| GitOps 동기화 대기 | CI 완료와 Argo CD polling 시점이 다름. 수동 Sync 없이 Synced/Healthy 및 실제 응답까지 관찰 |
 
-**남은 순서:** GHCR Public 변경 → 익명 pull 성공 확인 → 새 응답 버전 push → 새 SHA/Pod/실제 응답 확인. 임시 인증이 종료된 상태에서 이 순서를 통과해야 공개 이미지 기준으로도 완료라고 할 수 있습니다.
+기본 과제의 미해결 항목은 없습니다. 실습 저장소와 Actions 로그는 비공개이므로 아래에 핵심 설정과 실제 결과를 함께 첨부합니다. 캡처 두 장은 **수집한 Kubernetes/Argo CD JSON과 HTTP 응답을 렌더링한 증빙**이며 Argo CD 웹 UI 화면은 아닙니다. 자격 증명은 포함하지 않았습니다. 선택 심화 2·3의 잘못된 이미지 태그 지정·Git revert 실험과 prune 삭제 실험은 수행 범위에 포함하지 않았습니다.
 
 ## 전체 버전 추적표
 
-이미지 저장소 공통 prefix는 `ghcr.io/dev-jiseok/nginx-api`입니다. 아래에는 실제 전체 참조를 보존했습니다.
+모든 이미지 태그는 전체 소스 SHA입니다. 각 행의 Deployment image와 Pod image는 동일하며, 아래 펼침 영역에 전체 값과 digest를 기록했습니다.
+
+| 단계 | 소스 SHA (앞 12자리) | 실행 Pod | HTTP 응답 | GHCR 익명 요청 |
+|---|---|---|---|---|
+| Direct CI v1 | `e0ec1aa14223` | `nginx-api-9f59ff989-cqfpr` | 200 / v1 | 200 |
+| Direct CI v2 | `5720d8bf031a` | `nginx-api-6db5cc5b94-l44r2` | 200 / v2 | 200 |
+| GitOps 첫 동기화 v2 | `5720d8bf031a` | `nginx-api-6db5cc5b94-msqs2` | 200 / v2 | 200 |
+| GitOps 자동 배포 v3 | `5a3f260e5b79` | `nginx-api-79674b5f94-9xcbg` | 200 / v3 | 200 |
 
 <details>
-<summary>week3-ci-v1</summary>
+<summary>Direct CI v1: 전체 이미지와 실행 증거</summary>
 
 ```text
-namespace: cicd-ci
-Deployment image: ghcr.io/dev-jiseok/nginx-api:2fd1d557a21844cdbe3a3be3c7cea23c0fa6aed6
-Pod: nginx-api-757b859fdb-6kmpk
-Pod image: ghcr.io/dev-jiseok/nginx-api:2fd1d557a21844cdbe3a3be3c7cea23c0fa6aed6
-Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:1d9d4f25e4f44500d50284e0bc403f2b2098a648365f4920c8775eed80ec25f9
+Source SHA: e0ec1aa1422384646872a3888622d20f16535be8
+Deployment image: ghcr.io/dev-jiseok/nginx-api:e0ec1aa1422384646872a3888622d20f16535be8
+Pod: nginx-api-9f59ff989-cqfpr
+Pod image: ghcr.io/dev-jiseok/nginx-api:e0ec1aa1422384646872a3888622d20f16535be8
+Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:cc9548e6c025a85a79b925e81869aba8a341541064d8980913a124c3b39c34a2
+GHCR index digest: sha256:cc9548e6c025a85a79b925e81869aba8a341541064d8980913a124c3b39c34a2
+GHCR anonymous manifest HTTP: 200
+Pod imagePullSecrets: []
 HTTP 200: {"message":"hello from nginx","version":"v1"}
 ```
 
 </details>
 
 <details>
-<summary>week3-ci-v2</summary>
+<summary>Direct CI v2: 전체 이미지와 실행 증거</summary>
 
 ```text
-namespace: cicd-ci
-Deployment image: ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc
-Pod: nginx-api-6c48879f69-pcxwf
-Pod image: ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc
-Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:b534969185b3c6fda0c30438bdbc0b850df022b78f100b2180613e10b0bab3d5
+Source SHA: 5720d8bf031ab767cc7c38024209ea122debbd3a
+Deployment image: ghcr.io/dev-jiseok/nginx-api:5720d8bf031ab767cc7c38024209ea122debbd3a
+Pod: nginx-api-6db5cc5b94-l44r2
+Pod image: ghcr.io/dev-jiseok/nginx-api:5720d8bf031ab767cc7c38024209ea122debbd3a
+Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:c926bdbf669b6629fe54f99b96106ada5fca2112dde5a804613343964bf31cb0
+GHCR index digest: sha256:c926bdbf669b6629fe54f99b96106ada5fca2112dde5a804613343964bf31cb0
+GHCR anonymous manifest HTTP: 200
+Pod imagePullSecrets: []
 HTTP 200: {"message":"hello from nginx","version":"v2"}
 ```
 
 </details>
 
 <details>
-<summary>week3-gitops-initial</summary>
+<summary>GitOps 첫 동기화 v2: 전체 이미지와 실행 증거</summary>
 
 ```text
-namespace: cicd-gitops
-Deployment image: ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc
-Pod: nginx-api-6c48879f69-nkjjc
-Pod image: ghcr.io/dev-jiseok/nginx-api:ef7956987576fd5e2cc6ede09671492710cdbdfc
-Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:b534969185b3c6fda0c30438bdbc0b850df022b78f100b2180613e10b0bab3d5
+Source SHA: 5720d8bf031ab767cc7c38024209ea122debbd3a
+Deployment image: ghcr.io/dev-jiseok/nginx-api:5720d8bf031ab767cc7c38024209ea122debbd3a
+Pod: nginx-api-6db5cc5b94-msqs2
+Pod image: ghcr.io/dev-jiseok/nginx-api:5720d8bf031ab767cc7c38024209ea122debbd3a
+Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:c926bdbf669b6629fe54f99b96106ada5fca2112dde5a804613343964bf31cb0
+GHCR index digest: sha256:c926bdbf669b6629fe54f99b96106ada5fca2112dde5a804613343964bf31cb0
+GHCR anonymous manifest HTTP: 200
+Pod imagePullSecrets: []
 HTTP 200: {"message":"hello from nginx","version":"v2"}
+Argo CD revision: 8fda02ca582bac8882aa78466f7025eafc101e62
+Argo CD: Synced / Healthy
+관찰 시각 (UTC): 2026-11-19T11:19:25Z
 ```
 
 </details>
 
 <details>
-<summary>week3-gitops-v3</summary>
+<summary>GitOps 자동 배포 v3: 전체 이미지와 실행 증거</summary>
 
 ```text
-namespace: cicd-gitops
-Deployment image: ghcr.io/dev-jiseok/nginx-api:931143126b7ebce575a0d39b55e2e1dcb29a8c2b
-Pod: nginx-api-5bc66dc678-69lvr
-Pod image: ghcr.io/dev-jiseok/nginx-api:931143126b7ebce575a0d39b55e2e1dcb29a8c2b
-Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:be3c86db1a816335a2ed7ca8cba760ebf3575776780e8d38de5362eb344b0433
+Source SHA: 5a3f260e5b7945c7290bfef48d7f4ad40f657d9b
+Deployment image: ghcr.io/dev-jiseok/nginx-api:5a3f260e5b7945c7290bfef48d7f4ad40f657d9b
+Pod: nginx-api-79674b5f94-9xcbg
+Pod image: ghcr.io/dev-jiseok/nginx-api:5a3f260e5b7945c7290bfef48d7f4ad40f657d9b
+Pod imageID: ghcr.io/dev-jiseok/nginx-api@sha256:8778b897081cb9a8fd2232601652cffa69103345ffb0358b6db8d4dbe56ebf56
+GHCR index digest: sha256:8778b897081cb9a8fd2232601652cffa69103345ffb0358b6db8d4dbe56ebf56
+GHCR anonymous manifest HTTP: 200
+Pod imagePullSecrets: []
 HTTP 200: {"message":"hello from nginx","version":"v3"}
+Argo CD revision: 17d19c122ea737e454aba043119dfce329fbfee9
+Argo CD: Synced / Healthy
+관찰 시각 (UTC): 2026-11-19T11:23:55Z
 ```
 
 </details>
@@ -248,7 +290,7 @@ HTTP 200: {"message":"hello from nginx","version":"v3"}
 비공개 실습 저장소의 핵심 설정을 이 문서에 첨부했습니다. 자격 증명은 제외했습니다. 발표 자료와 전체 로그는 제출 PR에서 분리해 보관합니다.
 
 <details>
-<summary>과제 2: 실제 사용한 직접 배포 워크플로</summary>
+<summary>과제 2: 공개 GHCR 직접 배포 워크플로</summary>
 
 ```yaml
 name: Build and deploy Nginx API
@@ -290,9 +332,6 @@ jobs:
           tags: ${{ steps.image.outputs.image }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
   deploy:
-    permissions:
-      contents: read
-      packages: read
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS, ARM64, jiseok-k8s]
@@ -301,17 +340,6 @@ jobs:
       KUBE_CONTEXT: kind-jiseok-netlab
     steps:
       - uses: actions/checkout@v4
-      - name: Temporary private GHCR access for this job
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          kubectl --context "$KUBE_CONTEXT" -n cicd-ci create secret docker-registry ghcr-lab-pull \
-            --docker-server=ghcr.io --docker-username="$GITHUB_ACTOR" --docker-password="$GHCR_TOKEN" \
-            --dry-run=client -o json | kubectl --context "$KUBE_CONTEXT" -n cicd-ci apply --server-side -f -
-          kubectl --context "$KUBE_CONTEXT" -n cicd-ci patch serviceaccount default \
-            -p '{"imagePullSecrets":[{"name":"ghcr-lab-pull"}]}'
       - name: Deploy exact source SHA
         shell: bash
         run: |
@@ -461,7 +489,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: ghcr.io/dev-jiseok/nginx-api:931143126b7ebce575a0d39b55e2e1dcb29a8c2b
+          image: ghcr.io/dev-jiseok/nginx-api:5a3f260e5b7945c7290bfef48d7f4ad40f657d9b
           ports:
             - containerPort: 8080
           resources:
@@ -582,6 +610,34 @@ image:
 ```
 
 Helm Deployment는 일반 YAML의 replicas를 `{{ .Values.replicaCount }}`, image를 `"{{ .Values.image.repository }}:{{ .Values.image.tag }}"`로 렌더링합니다. Service의 spec은 일반 YAML과 같습니다.
+
+</details>
+
+<details>
+<summary>API 소스와 직접 배포 manifest의 관계</summary>
+
+`deploy/ci/deployment.yaml`은 위 GitOps Deployment와 같은 spec이며 image의 초기값만 `ghcr.io/dev-jiseok/nginx-api:bootstrap`입니다. workflow가 apply 전에 `kubectl set image --local`로 전체 SHA를 넣으므로 bootstrap 태그는 배포하지 않습니다. Service는 두 namespace에서 동일합니다.
+
+`app/Dockerfile` (최종 v3):
+
+```dockerfile
+FROM nginx:alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 8080
+```
+
+`app/nginx.conf` (최종 v3):
+
+```nginx
+server {
+    listen 8080;
+    server_name _;
+    default_type application/json;
+    location = /healthz { return 200 '{"status":"ok"}\n'; }
+    location = /api/hello { return 200 '{"message":"hello from nginx","version":"v3"}\n'; }
+    location / { return 404 '{"error":"not found"}\n'; }
+}
+```
 
 </details>
 
